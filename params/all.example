@@ -1,0 +1,76 @@
+# Set these parameters
+login_token: "<your OpenShift login token>"
+cluster_api_url: "<your OpenShift cluster API URL>"
+ibm_cr_token: "<your IBM Cloud Pak entitlement key>"
+
+
+# No need to change these
+use_ocp_certs_for_cp4i: no
+rw_once_storage_class: "ocs-storagecluster-ceph-rbd"
+rw_many_storage_class: "ocs-storagecluster-cephfs"
+cp4i_pn:
+  namespace: cp4i-pn
+  cs_namespace: ibm-common-services
+  operator_group_name: cp4i-pn-operator-group
+  subscription_channel: v7.0
+  subscription_namespace: openshift-operators
+  subscription_name: ibm-integration-platform-navigator
+  license: L-RJON-CJR2RX
+  version: "2022.4.1"
+cp4i_apic:
+  cr_name: small
+  namespace: cp4i-apic
+  operator_group_name: cp4i-apic-operator-group
+  subscription_channel: v3.2
+  subscription_namespace: openshift-operators
+  subscription_name: ibm-apiconnect
+  dpgw_subscription_namespace: openshift-operators
+  dpgw_subscription_name: datapower-operator-v1.6-ibm-operator-catalog-openshift-marketplace
+  license: L-GVEN-GFUPVE
+  version: "10.0.5.2-ifix1"
+  profile: n1xc7.m48
+  org_name: studentorg
+cp4i_es:
+  namespace: cp4i-es
+  operator_group_name: cp4i-es-operator-group
+  subscription_channel: v3.1
+  subscription_namespace: openshift-operators
+  subscription_name: ibm-eventstreams
+  version: latest
+cp4i_mq:
+  namespace: cp4i-mq
+  operator_group_name: cp4i-mq-operator-group
+  subscription_channel: v2.2
+  subscription_namespace: openshift-operators
+  subscription_name: ibm-mq
+  license: L-RJON-CJR2RX
+  version: 9.3.1.1-r1
+cp4i_ace:
+  namespace: cp4i-ace
+  operator_group_name: cp4i-ace-operator-group
+  subscription_channel: v7.0
+  subscription_namespace: openshift-operators
+  subscription_name: ibm-ace
+  designer:
+    license: L-APEH-CJUCNR
+    version: '12.0'
+  dashboard:
+    license: L-APEH-CJUCNR
+    version: '12.0'
+common_services:
+  namespace: ibm-common-services
+  admin_pwd_secret: platform-auth-idp-credentials
+ldap:
+  name: Workshop_LDAP
+  base_dn: 'dc=ibmbuildlab,dc=com"
+  server: 'ldap://169.63.185.122:389'
+  group_filter: '(&(cn=%v)(objectclass=groupOfUniqueNames))'
+  group_id_map: '*:cn'
+  group_member_id_map: 'groupOfUniqueNames:uniqueMember'
+  user_filter: '(&(uid=%v)(objectclass=inetOrgPerson))'
+  user_id_map: '*:uid'
+  bind_dn: 'cn=admin,dc=ibmbuildlab,dc=com"
+  bind_dn_password: 'mko08uhB'
+crds_to_save:
+  - "rbacsyncs.ibm.com"
+
