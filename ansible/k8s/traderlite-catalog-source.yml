@@ -1,0 +1,13 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: CatalogSource
+metadata:
+  name: ibm-build-lab-operator-catalog
+  namespace: openshift-marketplace
+spec:
+  sourceType: grpc
+  image: quay.io/clouddragons/traderlite-operator-index:3.0.4
+  displayName: Build Lab Operator Catalog
+  publisher: IBM Build Lab
+  updateStrategy:
+    registryPoll:
+      interval: 30m

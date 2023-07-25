@@ -1,0 +1,12 @@
+apiVersion: operator.ibm.com/v1alpha1
+kind: OperandRequest
+metadata:
+  name: register-new-ca-cert
+  namespace: {{ cp4i_pn.cs_namespace }}
+spec:
+  requests:
+    - operands:
+        - name: ibm-management-ingress-operator
+      registry: common-service
+      registryNamespace: {{ cp4i_pn.cs_namespace }}
+      

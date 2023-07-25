@@ -1,0 +1,56 @@
+---
+- name: Get progress marker
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: 006-es-install-progress
+    namespace: default
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: existing_es_install_progress
+
+- name: Make sure Event Streams  install is started
+  ansible.builtin.assert:
+    that:
+      - (existing_es_install_progress.resources | length) == 1
+    fail_msg: "es-install never started"
+
+- name: Skipping wait if already complete
+  debug:
+    msg: "es-install already complete - skipping wait"
+  when: existing_es_install_progress.resources[0].data.state == 'complete'
+
+- name: Wait for es-install to complete if not completed
+  block:
+    - name: Wait up to 10 mins for EventStreams CR to be avail
+      kubernetes.core.k8s_info:
+        api_version: eventstreams.ibm.com/v1beta2
+        kind: EventStreams
+        name: light-insecure
+        namespace: "{{ cp4i_es.namespace }}"
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: es_cr
+      until: es_cr.resources is defined and (es_cr.resources | length) == 1 and  es_cr.resources[0].status.phase == "Ready"
+      delay: 20
+      retries: 30
+
+    - name: Update CM marker
+      community.okd.k8s:
+        state: present
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: 006-es-install-progress
+            namespace: default
+          data:
+            state: complete
+
+  when: existing_es_install_progress.resources[0].data.state == 'started'
+  
+- name: Successful completion message
+  debug:
+    msg: "es-install completed successfully"

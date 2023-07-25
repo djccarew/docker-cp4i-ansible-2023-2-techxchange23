@@ -1,0 +1,136 @@
+---
+- name: Get progress marker
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: 007-ace-install-progress
+    namespace: default
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: existing_ace_install_progress
+
+- name: Create CM marker if needed
+  community.okd.k8s:
+    state: present
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: 007-ace-install-progress
+        namespace: default
+      data:
+        state: started
+  register: new_ace_install_progress
+  when: (existing_ace_install_progress.resources | length) == 0
+
+- name: Get marker CM state (existing marker)
+  ansible.builtin.set_fact:
+    ace_marker_state: "{{ existing_ace_install_progress.resources[0].data.state }}"
+  when: (existing_ace_install_progress.resources | length) == 1
+
+- name: Get marker CM state (new marker)
+  ansible.builtin.set_fact:
+    ace_marker_state: 'started'
+  when: (existing_ace_install_progress.resources | length) == 0
+
+- name: Skip ace-install task message
+  debug:
+    msg: "ace-install task already completed. Skipping ..."
+  when: ace_marker_state == 'complete'
+
+- name: Run ace-install tasks
+  block:
+    - name: Executing ace-install task message
+      debug:
+        msg: "Executing ace-install task"
+
+    # - name: Set vars for Operator Group
+    #   ansible.builtin.set_fact:
+    #     operator_group_name: "{{ cp4i_ace.operator_group_name }}"
+    #     operator_group_namespace:  "{{ cp4i_ace.namespace }}"
+
+    # - name: OperatorGroup from template
+    #   ansible.builtin.template:
+    #     src: templates/cp4i-operator-group.yml.j2
+    #     dest: k8s/cp4i-ace-operator-group.yml
+    #     force: yes
+
+    # - name: OperatorGroup
+    #   community.okd.k8s:
+    #     state: present
+    #     api_key: "{{ login_token }}"
+    #     host: "{{ cluster_api_url }}"
+    #     src: "k8s/cp4i-ace-operator-group.yml"
+
+    - name: Subscription from template
+      ansible.builtin.template:
+        src: cp4i-ace-subscription.yml.j2
+        dest: k8s/cp4i-ace-subscription.yml
+        force: no
+
+    - name: Subscription
+      community.okd.k8s:
+        state: present
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        src: "k8s/cp4i-ace-subscription.yml"
+
+    - name: Wait a few seconds for the  CSV to accessible
+      ansible.builtin.pause:
+        seconds: 5
+
+    - name: Wait up to 3 mins for Subscription to be ready
+      kubernetes.core.k8s_info:
+        api_version: operators.coreos.com/v1alpha1
+        kind: Subscription
+        name: "{{ cp4i_ace.subscription_name }}"
+        namespace: "{{ cp4i_ace.subscription_namespace }}"
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: ace_subscription
+      until: ace_subscription.resources is defined and (ace_subscription.resources | length) > 0 and ace_subscription.resources[0].status.currentCSV is defined
+      delay: 10
+      retries: 18
+
+    - name: Wait up to  5 mins for ACE CSV to be avail
+      kubernetes.core.k8s_info:
+        api_version: operators.coreos.com/v1alpha1
+        kind: ClusterServiceVersion
+        name: "{{ ace_subscription.resources[0].status.currentCSV }}"
+        namespace: "{{ cp4i_ace.namespace }}"
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: ace_csv
+      until: ace_csv.resources is defined and (ace_csv.resources | length) == 1 and  ace_csv.resources[0].status is defined and ace_csv.resources[0].status.phase is defined and ace_csv.resources[0].status.phase == "Succeeded"
+      delay: 10
+      retries: 30
+
+    - name: DesignerAuthoring from template
+      ansible.builtin.template:
+        src: cp4i-ace-designer.yml.j2
+        dest: k8s/cp4i-ace-designer.yml
+        force: yes
+
+    - name: DesignerAuthoring
+      community.okd.k8s:
+        state: present
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        src: "k8s/cp4i-ace-designer.yml"
+
+    # - name: Dashboard from template
+    #   ansible.builtin.template:
+    #     src: cp4i-ace-dashboard.yml.j2
+    #     dest: k8s/cp4i-ace-dashboard.yml
+    #     force: yes
+
+    # - name: Dashboard
+    #   community.okd.k8s:
+    #     state: present
+    #     api_key: "{{ login_token }}"
+    #     host: "{{ cluster_api_url }}"
+    #     src: "k8s/cp4i-ace-dashboard.yml"
+
+  when: ace_marker_state == 'started'

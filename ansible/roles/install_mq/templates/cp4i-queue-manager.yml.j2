@@ -1,0 +1,35 @@
+apiVersion: mq.ibm.com/v1beta1
+kind: QueueManager
+metadata:
+  name: quickstart-cp4i
+  namespace: {{ cp4i_mq.namespace }}
+spec:
+  license:
+    accept: true
+    license: {{ cp4i_mq.license }}
+    use: NonProduction
+  queueManager:
+    name: QMTRADER
+    resources:
+      limits:
+        cpu: 500m
+      requests:
+        cpu: 500m
+    storage:
+      queueManager:
+        type: ephemeral
+    mqsc:
+      - configMap:
+          name: qmtrader-mqsc
+          items:
+            - mqsc
+  template:
+    pod:
+      containers:
+        - env:
+            - name: MQSNOAUT
+              value: 'yes'
+          name: qmgr
+  version: {{ cp4i_mq.version }}
+  web:
+    enabled: true

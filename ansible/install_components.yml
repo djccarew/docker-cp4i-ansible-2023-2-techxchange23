@@ -1,0 +1,17 @@
+---
+- hosts: localhost
+  gather_facts: true
+
+  roles:
+    # - role: install_assets
+    # - role: install_apic
+    # - role: install_es
+    # - role: install_ace
+    # - role: install_mq
+   # - role: install_traderlite
+    - role: wait_for_install_assets
+    - role: wait_for_install_mq
+    - role: wait_for_install_ace
+    - role: wait_for_install_es
+    - role: wait_for_install_apic
+  

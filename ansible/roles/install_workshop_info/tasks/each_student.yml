@@ -1,0 +1,41 @@
+---
+- name: Save user uid name
+  ansible.builtin.set_fact:
+    uid: "{{ 'student%03d' | format(item) }}"
+
+- name: Display user being processed
+  ansible.builtin.debug:
+    msg: "Processing user {{ uid }} ..."
+    
+- name: ServiceAccount
+  kubernetes.core.k8s:
+    state: present
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+    template: "cp4i-workshop-info-sa.yml.j2"
+  
+- name: Deployment
+  kubernetes.core.k8s:
+    state: present
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+    template: "cp4i-workshop-info-deployment.yml.j2"
+    wait: yes
+    wait_condition: 
+      type: Available
+    wait_sleep: 10
+    wait_timeout: 300
+
+- name: Service
+  kubernetes.core.k8s:
+    state: present
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+    template: cp4i-workshop-info-service.yml.j2
+
+- name: Route
+  kubernetes.core.k8s:
+    state: present
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+    template: cp4i-workshop-info-route.yml.j2

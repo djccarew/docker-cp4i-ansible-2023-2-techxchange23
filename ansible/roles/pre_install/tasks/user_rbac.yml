@@ -1,0 +1,9 @@
+# rbac for a single user
+- name: Save user uid name
+  ansible.builtin.set_fact:
+    uid: "{{ 'student%d' | format(item) }}"
+
+- name: Set RBAC permissions
+  ansible.builtin.shell:
+    cmd: oc adm policy add-role-to-user edit {{ uid }} -n {{ uid }}
+

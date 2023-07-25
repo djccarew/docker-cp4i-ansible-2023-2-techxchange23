@@ -1,0 +1,27 @@
+---
+- hosts: localhost
+  gather_facts: true
+
+  pre_tasks:
+    - name: Prompt user for confirmation
+      pause:
+        prompt: "This will uninstall CP4I are you sure (yes/no) ?"
+      register: confirmation
+      delegate_to: localhost
+
+
+  roles:
+    - role: uninstall_apic
+      when: confirmation | bool
+    - role: uninstall_pn
+      when: confirmation | bool  
+    - role: uninstall_ace
+      when: confirmation | bool  
+    - role: uninstall_es
+      when: confirmation | bool   
+    - role: uninstall_mq
+      when: confirmation | bool
+    - role: uninstall_common_services
+      when: confirmation | bool
+    - role: uninstall_namespaces
+      when: confirmation | bool

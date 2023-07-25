@@ -1,0 +1,26 @@
+---
+- name: Delete CP4I namespaces
+  community.okd.k8s:
+    api_version: v1
+    kind: Namespace
+    name: "{{ item }}"
+    state: absent
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  with_items:
+    - "cp4i-mq"
+    - "cp4i-pn"
+    - "cp4i-apic"
+    - "cp4i-ace"
+    - "cp4i-es"
+    - "ibm-common-services"
+
+- name: Delete marker CM for pre install
+  community.okd.k8s:
+    api_version: v1
+    kind: ConfigMap
+    name: 01-pre-install-progress
+    namespace: default
+    state: absent
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"

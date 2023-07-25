@@ -1,0 +1,9 @@
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: traderlite-role
+  namespace: {{ namespace }}
+rules:
+  - apiGroups: ["operators.buildlab.cloud"]
+    resources: ["traderlites"]
+    verbs: ["get", "list", "create", "update", "delete"]

@@ -1,0 +1,12 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: {{ traderlite.subscription_name }}
+  namespace: {{ namespace }}
+spec:
+  channel: "{{ traderlite.subscription_channel }}"
+  installPlanApproval: Automatic
+  name: {{ traderlite.subscription_name }}
+  source: ibm-build-lab-operator-catalog
+  sourceNamespace: openshift-marketplace
+  

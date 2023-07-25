@@ -1,0 +1,144 @@
+---
+- name: Get progress marker
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: 011-apic-mail-server-setup-progress
+    namespace: default
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: existing_apic_mail_server_setup_progress
+
+- name: Create CM marker if needed
+  community.okd.k8s:
+    state: present
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: 011-apic-mail-server-setup-progress
+        namespace: default
+      data:
+        state: started
+  register: new_apic_install_progress
+  when: (existing_apic_mail_server_setup_progress.resources | length) == 0
+
+- name: Get marker CM state (existing marker)
+  ansible.builtin.set_fact:
+    apic_mail_server_marker_state: "{{ existing_apic_mail_server_setup_progress.resources[0].data.state }}"
+  when: (existing_apic_mail_server_setup_progress.resources | length) == 1
+
+- name: Get marker CM state (new marker)
+  ansible.builtin.set_fact:
+    apic_mail_server_marker_state: 'started'
+  when: (existing_apic_mail_server_setup_progress.resources | length) == 0
+
+- name: Skip apic-org-setup task message
+  debug:
+    msg: "apic-org-setup task already completed. Skipping ..."
+  when: apic_mail_server_marker_state == 'complete'
+
+- name: Run apic-org-setup tasks
+  block:
+    - name: Executing apic-org-setup task message
+      debug:
+        msg: "Executing apic-org-setup task"
+
+    - name: Cloud Admin pwd secret
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        name: "{{ cp4i_apic.cr_name }}-mgmt-admin-pass"
+        namespace: "{{ cp4i_apic.namespace }}"
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: cloud_admin_pwd_secret
+
+    - name: Grab data from secret
+      ansible.builtin.set_fact:
+        admin_pwd: "{{ cloud_admin_pwd_secret.resources[0].data.password | b64decode }}"
+
+    - name: Get cpd route
+      kubernetes.core.k8s_info:
+        api_version: route.openshift.io/v1
+        kind: Route
+        name: cpd
+        namespace: "{{ cp4i_pn.namespace }}"
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: cpd_route
+
+    - name: "apic toolkit login server"
+      ansible.builtin.set_fact:
+        apic_host: "{{ cpd_route.resources[0].spec.host }}/integration/apis/{{ cp4i_apic.namespace }}/{{ cp4i_apic.cr_name }}"
+
+    - name: Run apic toolkit command to login
+      ansible.builtin.shell:
+        cmd: yes | apic-slim login --server {{ apic_host }} --username admin --password '{{ admin_pwd }}' --realm admin/default-idp-1 --accept-license
+
+    - name: Check if mail server created 
+      ansible.builtin.shell:
+        cmd:  apic-slim mail-servers:list  --server  {{ apic_host }} --org admin | grep default-mail-server
+      register: mail_server_list_cmd
+      failed_when: mail_server_list_cmd.rc == 2
+
+    - name: Configure mail server if not yet configured
+      block:
+        - name:  Create Mail server config from template
+          ansible.builtin.template:
+            src: mail-server-config.yml.j2
+            dest: apic/mail-server-config.yml
+            force: yes
+
+        - name: Create mail server 
+          ansible.builtin.shell:
+            cmd:  apic-slim mail-servers:create  --server  {{ apic_host }} --org admin  apic/mail-server-config.yml
+          register: mail_server_create_cmd  
+
+        - name: Get mail server url from create  comaand 
+          ansible.builtin.shell:
+            cmd:  echo "{{ mail_server_create_cmd.stdout }}" | awk '{ print $2 }'
+          register: mail_server_url_cmd
+
+        - name: Save mail server URL
+          ansible.builtin.set_fact:
+            mail_server_url: "{{ mail_server_url_cmd.stdout }}"
+
+        - name:  Create mail server url setting from template
+          ansible.builtin.template:
+            src: mail-server-url-setting.yml.j2
+            dest: apic/mail-server-url-setting.yml
+            force: yes     
+
+        - name: Update Cloud settings with mail server URL
+          ansible.builtin.shell:
+            cmd: apic-slim cloud-settings:update --server {{ apic_host }} apic/mail-server-url-setting.yml
+
+
+      when:  mail_server_list_cmd.rc == 1
+
+    - name: Run apic toolkit command to logout
+      ansible.builtin.shell:
+        cmd: apic-slim logout --server {{ apic_host }}
+
+    - name: Update CM marker
+      community.okd.k8s:
+        state: present
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: 011-apic-mail-server-setup-progress
+            namespace: default
+          data:
+            state: complete
+
+  when: apic_mail_server_marker_state == 'started'
+
+- name: Successful completion message
+  debug:
+    msg: "apic-mail-server-setup completed successfully"

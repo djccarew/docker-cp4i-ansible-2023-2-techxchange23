@@ -1,0 +1,14 @@
+apiVersion: integration.ibm.com/v1beta1
+kind: PlatformNavigator
+metadata:
+  name: integration-navigator
+  namespace: {{ cp4i_pn.namespace }}
+spec:
+  license:
+    accept: true
+    license: {{ cp4i_pn.license }}
+  mqDashboard: true
+  replicas: 2
+  storage:
+    class: {{ rw_many_storage_class }}
+  version: "{{ cp4i_pn.version }}"

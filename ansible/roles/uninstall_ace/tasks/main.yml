@@ -1,0 +1,74 @@
+---
+- name: Get ACE namespace
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Namespace
+    name: "{{ cp4i_ace.namespace }}"
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: cp4i_ace_ns
+
+- name: Delete namespaced resources
+  block:
+
+    - name: Delete DesignerAuthoring operands
+      ansible.builtin.shell: oc delete designerauthoring --all -n {{ cp4i_ace.namespace }} --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+
+    - name: Delete Dashboard operands
+      ansible.builtin.shell: oc delete dashboard --all -n {{ cp4i_ace.namespace }} --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+
+    - name: Delete Configuration operands
+      ansible.builtin.shell: oc delete configuration --all -n {{ cp4i_ace.namespace }} --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+
+    - name: Delete IntegrationServer  operands
+      ansible.builtin.shell: oc delete integrationserver --all -n {{ cp4i_ace.namespace }} --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+
+  when: (cp4i_ace_ns.resources | length) == 1
+
+- name: Get Subscription
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: Subscription
+    name: "{{ cp4i_ace.subscription_name }}"
+    namespace: "{{ cp4i_ace.subscription_namespace }}"
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: cp4i_ace_subscription
+
+- name: Delete subscription and CSV
+  block:
+    - name: Delete Operator
+      community.okd.k8s:
+        api_version: operators.coreos.com/v1alpha1
+        kind: Subscription
+        name: "{{ cp4i_ace.subscription_name }}"
+        namespace: "{{ cp4i_ace.subscription_namespace }}"
+        state: absent
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+
+    - name: Delete CSV
+      community.okd.k8s:
+        api_version: operators.coreos.com/v1alpha1
+        kind: ClusterServiceVersion
+        name: "{{ cp4i_ace_subscription.resources[0].status.currentCSV }}"
+        namespace: "{{ cp4i_ace.subscription_namespace }}"
+        state: absent
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+
+  when: (cp4i_ace_subscription.resources | length) == 1
+
+- name: Delete marker CM
+  community.okd.k8s:
+    api_version: v1
+    kind: ConfigMap
+    name: 04-ace-install-progress
+    namespace: default
+    state: absent
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"

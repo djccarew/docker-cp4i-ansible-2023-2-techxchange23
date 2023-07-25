@@ -1,0 +1,19 @@
+name: workshop-ldap
+title: "Workshop LDAP"
+integration_url: {{ ldap_integration_url }}
+user_managed: false
+user_registry_managed: false
+case_sensitive: false
+identity_providers:
+ - name: workshop-openldap
+   title: "OpenLDAP Local"
+endpoint:
+  endpoint: "{{ ldap.server }}"
+configuration:
+  authentication_method: compose_dn
+  authenticated_bind: "true"
+  admin_dn: "{{ ldap.bind_dn }}"
+  admin_password: "{{ ldap.bind_dn_password }}"
+  search_dn_base: "{{ ldap.base_dn }}"
+  bind_prefix: "uid="
+  bind_suffix: ",ou=users,{{ ldap.base_dn }}"

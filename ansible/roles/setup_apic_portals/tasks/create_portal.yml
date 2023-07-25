@@ -1,0 +1,74 @@
+# configures  a single student portal
+---
+- name: Save user uid name
+  ansible.builtin.set_fact:
+    uid: "{{ 'student%03d' | format(item) }}"
+
+- name: Save org name
+  ansible.builtin.set_fact:
+   org: "{{ uid }}org"
+
+- name: Output uid
+  ansible.builtin.debug:
+    msg: "Processing {{ uid }} ..."
+
+- name: Get password for current user
+  community.general.ldap_search: 
+    bind_dn: "{{ ldap.bind_dn }}"
+    bind_pw: "{{ ldap.bind_dn_password }}"
+    server_uri: "{{ ldap.server }}"
+    dn: "ou=users,{{ ldap.base_dn }}"
+    filter: "(uid={{ uid }})"
+    scope: "onelevel"
+    attrs:
+      - "userpassword"
+  register: ldap_search_output
+
+- name: Login to mgmt server
+  ansible.builtin.shell:
+    cmd: yes | apic-slim login --server {{ apic_mgmt_host }}  --realm provider/workshop-openldap -u {{ uid }} -p {{ ldap_search_output.results[0].userPassword }}
+
+- name: Get Portal 
+  ansible.builtin.shell:
+    cmd: apic-slim portal-services:list --server  {{ apic_mgmt_host }} --scope org --org {{ org }}
+  register: get_portal_cmd
+
+- name: Get Portal URL cmd
+  ansible.builtin.shell:
+    cmd: echo "{{ get_portal_cmd.stdout }}" | awk '{ print $4 }'
+  register: get_portal_url_cmd
+
+- name: Get catalog settings
+  ansible.builtin.shell:
+    cmd: apic-slim catalog-settings:get --server {{ apic_mgmt_host }}  --org {{ org }} --catalog sandbox --format json --output apic
+
+- name: Update settings with Portal URL
+  ansible.builtin.shell:
+    cmd: jq --arg PORTAL_URL {{ get_portal_url_cmd.stdout }} --arg APIC_PORTAL_TYPE drupal '.portal.type= $APIC_PORTAL_TYPE | .portal.portal_service_url=$PORTAL_URL |  del(.created_at, .updated_at)' apic/catalog-setting.json > apic/catalog-setting-updated.json
+       
+- name: Update catalog setting with portal URL
+  ansible.builtin.shell:
+    cmd: apic-slim catalog-settings:update --server {{ apic_mgmt_host }}  --org {{ org }} --catalog sandbox apic/catalog-setting-updated.json
+
+- name: Remove updated catalog settings file
+  ansible.builtin.file:
+    path: apic/catalog-setting-updated.json
+    state: absent
+
+- name: Remove catalog settings file
+  ansible.builtin.file:
+    path: apic/catalog-setting.json
+    state: absent
+
+- name: Logout of  mgmt server
+  ansible.builtin.shell:
+    cmd: apic-slim logout --server {{ apic_mgmt_host }} 
+
+- name: Pause for backend to quiesce
+  ansible.builtin.pause:
+    seconds: 8
+ 
+    
+
+
+

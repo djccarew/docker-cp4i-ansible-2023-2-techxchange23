@@ -1,0 +1,87 @@
+---
+- name: Get progress marker
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: 012-apic-portal-setup-progress
+    namespace: default
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: existing_apic_portal_setup_progress
+
+- name: Create CM marker if needed
+  community.okd.k8s:
+    state: present
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: 012-apic-portal-setup-progress
+        namespace: default
+      data:
+        state: started
+  register: new_apic_install_progress
+  when: (existing_apic_portal_setup_progress.resources | length) == 0
+
+- name: Get marker CM state (existing marker)
+  ansible.builtin.set_fact:
+    apic_portal_marker_state: "{{ existing_apic_portal_setup_progress.resources[0].data.state }}"
+  when: (existing_apic_portal_setup_progress.resources | length) == 1
+
+- name: Get marker CM state (new marker)
+  ansible.builtin.set_fact:
+    apic_portal_marker_state: 'started'
+  when: (existing_apic_portal_setup_progress.resources | length) == 0
+
+- name: Skip apic-portal-setup task message
+  debug:
+    msg: "apic-portal-setup task already completed. Skipping ..."
+  when: apic_portal_marker_state == 'complete'
+
+- name: Run apic-portal-setup tasks
+  block:
+    - name: Executing apic-portal-setup task message
+      debug:
+        msg: "Executing apic-portal-setup task"
+
+    - name: Get APIC mgmt server route
+      kubernetes.core.k8s_info:
+        api_version: route.openshift.io/v1
+        kind: Route
+ #       name: "{{ cp4i_apic.cr_name}}-mgmt-platform-api"
+        label_selectors:
+          - "app.kubernetes.io/name=platform-api-endpoint"
+        namespace: "{{ cp4i_apic.namespace }}"
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: apic_mgmt_route
+
+    - name: "apic mgmt host"
+      ansible.builtin.set_fact:
+        apic_mgmt_host: "{{ apic_mgmt_route.resources[0].spec.host }}"
+
+    - name: Create portals for each user
+      include_tasks: create_portal.yml
+      loop: "{{ range(student_start_index, num_students + student_start_index, 1)|list }}"
+
+    - name: Update CM marker
+      community.okd.k8s:
+        state: present
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: 012-apic-portal-setup-progress
+            namespace: default
+          data:
+            state: complete
+
+  when: apic_portal_marker_state == 'started'
+
+- name: Successful completion message
+  debug:
+    msg: "apic-portal-setup completed successfully"

@@ -1,0 +1,29 @@
+---
+- hosts: localhost
+  gather_facts: true
+
+  roles:
+    - role: validate_parms
+      when: vars_validated is not defined
+    - role: pre_install
+    - role: install_pn
+    - role: wait_for_install_pn
+    - role: update_cp4i_ssl_certs
+      when: use_ocp_certs_for_cp4i
+    - role: setup_ldap
+    - role: install_apic
+    - role: install_es
+    - role: install_ace
+    - role: install_mq
+    - role: install_assets
+    #- role: install_traderlite
+    - role: wait_for_install_assets
+    - role: wait_for_install_mq
+    - role: wait_for_install_ace
+    - role: wait_for_install_es
+    - role: wait_for_install_apic
+    - role: setup_apic_orgs
+    - role: setup_apic_mail_server
+    - role: setup_apic_portals
+   # - role: install_workshop_info
+  

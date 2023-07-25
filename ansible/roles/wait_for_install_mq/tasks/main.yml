@@ -1,0 +1,51 @@
+---
+- name: Get progress marker
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: 008-mq-install-progress
+    namespace: default
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: existing_mq_install_progress
+
+- name: Make sure MQ install is started
+  ansible.builtin.assert:
+    that:
+      - (existing_mq_install_progress.resources | length) == 1
+    fail_msg: "mq-install never started"
+
+- name: Wait for mq-install to complete
+  block:
+    - name: Wait up to 10 mins for QueueManager CR to be avail
+      kubernetes.core.k8s_info:
+        api_version: mq.ibm.com/v1beta1
+        kind: QueueManager
+        name: quickstart-cp4i
+        namespace: "{{ cp4i_mq.namespace }}"
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: mq_cr
+      until: mq_cr.resources is defined and (mq_cr.resources | length) == 1 and  mq_cr.resources[0].status is defined and mq_cr.resources[0].status.phase == "Running"
+      delay: 20
+      retries: 30
+
+    - name: Update CM marker
+      community.okd.k8s:
+        state: present
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: 008-mq-install-progress
+            namespace: default
+          data:
+            state: complete
+  when: existing_mq_install_progress.resources[0].data.state == 'started'
+
+- name: Successful completion message
+  debug:
+    msg: "mq-install completed successfully"
+  #when: existing_mq_install_progress.resources[0].data.state == 'complete'

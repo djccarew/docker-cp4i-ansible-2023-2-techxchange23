@@ -1,0 +1,17 @@
+---
+- name: Get student001 password
+  community.general.ldap_search: 
+    bind_dn: "{{ ldap.bind_dn }}"
+    bind_pw: "{{ ldap.bind_dn_password }}"
+    server_uri: "{{ ldap.server }}"
+    dn: "ou=users,{{ ldap.base_dn }}"
+    filter: "(uid=student001)"
+    scope: "onelevel"
+    attrs:
+      - "userpassword"
+  register: ldap_search_output
+
+- name: Show debug output
+  debug:
+    var: ldap_search_output
+

@@ -1,0 +1,18 @@
+apiVersion: apiconnect.ibm.com/v1beta1
+kind: APIConnectCluster
+metadata:
+  name: {{ cp4i_apic.cr_name }}
+  labels:
+    app.kubernetes.io/instance: apiconnect
+    app.kubernetes.io/managed-by: ibm-apiconnect
+    app.kubernetes.io/name: apiconnect-small
+  namespace: {{ cp4i_apic.namespace }}
+spec:
+  license:
+    accept: true
+    license: {{ cp4i_apic.license }}
+    metric: VIRTUAL_PROCESSOR_CORE
+    use: nonproduction
+  profile: {{ cp4i_apic.profile }}
+  version: "{{ cp4i_apic.version }}"
+  storageClassName: {{ rw_once_storage_class }}

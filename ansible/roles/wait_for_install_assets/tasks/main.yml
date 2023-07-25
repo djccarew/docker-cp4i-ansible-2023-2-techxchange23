@@ -1,0 +1,56 @@
+---
+- name: Get progress marker
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: 004-assets-install-progress
+    namespace: default
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: existing_assets_install_progress
+
+- name: Make sure Assets  install is started
+  ansible.builtin.assert:
+    that:
+      - (existing_assets_install_progress.resources | length) == 1
+    fail_msg: "assets-install never started"
+
+- name: Skipping wait if already complete
+  debug:
+    msg: "assets-install already complete - skipping wait"
+  when: existing_assets_install_progress.resources[0].data.state == 'complete'
+
+- name: Wait for assets-install to complete if not completed
+  block:
+    - name: Wait up to 10 mins for AssetRepository CR to be avail
+      kubernetes.core.k8s_info:
+        api_version: integration.ibm.com/v1beta1
+        kind: AssetRepository
+        name: development
+        namespace: "{{ cp4i_assets.namespace }}"
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: assets_cr
+      until: assets_cr.resources is defined and (assets_cr.resources | length) == 1 and  assets_cr.resources[0].status.phase == "Ready"
+      delay: 20
+      retries: 30
+
+    - name: Update CM marker
+      community.okd.k8s:
+        state: present
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: 004-assets-install-progress
+            namespace: default
+          data:
+            state: complete
+
+  when: existing_assets_install_progress.resources[0].data.state == 'started'
+  
+- name: Successful completion message
+  debug:
+    msg: "assets-install completed successfully"

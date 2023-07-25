@@ -1,0 +1,51 @@
+---
+- name: Validate IBM container entitlement key
+  assert: 
+    that: 'ibm_cr_token is defined and ibm_cr_token is regex("^[a-zA-Z0-9.\-_]+$")'
+    fail_msg: "variable ibm_cr_token must be defined and contain only alphanumeric chars, dashes, underscores or periods"
+
+- name: Validate OpenShift login ibm_cr_token
+  assert:
+    that: 'login_token is defined and login_token is regex("^sha256~[A-Za-z0-9\-_]+$")'
+    fail_msg: "login_token must be defined and be in the format of a sha256 token"
+
+- name: Validate OpenShift cluster API URL
+  assert:
+    that: 'cluster_api_url is defined and cluster_api_url is regex("(https:\/\/)(\w+:{0,1}\w*@)?(\S+)(:[0-9]+)?(\/|\/([\w#!:.?+=&%@!\-\/]))?")'
+    fail_msg: "cluster_api_url must be defined and be in the format of an https url"
+
+- name: Validate RWO StorageClass 
+  assert: 
+    that: 'rw_once_storage_class is defined and rw_once_storage_class is regex("^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")'
+    fail_msg: "rw_once_storage_class must be defined and be in the format of a Kubernetes object name"
+
+- name: Validate RWX StorageClass 
+  assert: 
+    that: 'rw_many_storage_class is defined and rw_many_storage_class is regex("^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")'
+    fail_msg: "rw_many_storage_class must be defined and be in the format of a Kubernetes object name"
+
+- name: Validate OpenShift Cluster API and access to RWO StorageClass 
+  kubernetes.core.k8s_info:
+    api_version: storage.k8s.io/v1
+    kind: StorageClass
+    name: "{{ rw_once_storage_class }}"
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: rwo_storage_class_info
+  failed_when: 'rwo_storage_class_info.resources is not defined or (rwo_storage_class_info.resources | length) < 1'
+
+- name: Validate OpenShift Cluster API and access to RWX StorageClass 
+  kubernetes.core.k8s_info:
+    api_version: storage.k8s.io/v1
+    kind: StorageClass
+    name: "{{ rw_many_storage_class }}"
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: rwx_storage_class_info
+  failed_when: 'rwx_storage_class_info.resources is not defined or (rwx_storage_class_info.resources | length) < 1'
+
+- name: Save validation status as fact
+  set_fact:
+    cacheable: true
+    vars_validated: true
+

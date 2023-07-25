@@ -1,0 +1,51 @@
+---
+- name: Get progress marker
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: 002-pn-install-progress
+    namespace: default
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: existing_pn_install_progress
+
+- name: Make sure PN install is started
+  ansible.builtin.assert:
+    that:
+      - (existing_pn_install_progress.resources | length) == 1
+    fail_msg: "pn-install never started"
+
+- name: Wait for pn-install to complete
+  block:
+    - name: Wait up to 40 mins for PlatformNavigator CR to be avail
+      kubernetes.core.k8s_info:
+        api_version: integration.ibm.com/v1beta1
+        kind: PlatformNavigator
+        name: integration-navigator
+        namespace: "{{ cp4i_pn.namespace }}"
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: pn_cr
+      until: pn_cr.resources is defined and (pn_cr.resources | length) == 1 and pn_cr.resources[0].status is defined and pn_cr.resources[0].status.conditions[0].status == "True" and pn_cr.resources[0].status.conditions[0].type == "Ready"
+      delay: 20
+      retries: 120
+
+    - name: Update CM marker
+      community.okd.k8s:
+        state: present
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: 002-pn-install-progress
+            namespace: default
+          data:
+            state: complete
+  when: existing_pn_install_progress.resources[0].data.state == 'started'
+
+- name: Successful completion message
+  debug:
+    msg: "pn-install completed successfully"
+  #when: existing_pn_install_progress.resources[0].data.state == 'complete'

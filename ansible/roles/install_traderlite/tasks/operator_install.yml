@@ -1,0 +1,70 @@
+# Install in each user's namespace
+- name: Save user uid name
+  ansible.builtin.set_fact:
+    uid: "{{ 'student%03d' | format(item) }}"
+    namespace: "{{ 'student%03d' | format(item) }}"
+
+- name: Output namespace 
+  ansible.builtin.debug:
+    msg: "Processing {{ uid }} ..."
+
+- name: Set vars for Operator Group
+  ansible.builtin.set_fact:
+    operator_group_name: "{{ traderlite.operator_group_name }}"
+    operator_group_namespace:  "{{ namespace }}"
+
+- name: OperatorGroup from template
+  ansible.builtin.template:
+    src: traderlite-operator-group.yml.j2
+    dest: k8s/traderlite-operator-group.yml
+    force: yes
+
+- name: OperatorGroup
+  community.okd.k8s:
+    state: present
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+    src: "k8s/traderlite-operator-group.yml"
+
+- name: Subscription from template
+  ansible.builtin.template:
+    src: traderlite-subscription.yml.j2
+    dest: k8s/traderlite-subscription.yml
+    force: yes
+
+- name: Subscription
+  kubernetes.core.k8s:
+    state: present
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+    src: "k8s/traderlite-subscription.yml"
+
+- name: Wait a few seconds for the CSV to accessible
+  ansible.builtin.pause:
+    seconds: 5
+
+- name: Wait up to 3 mins for Subscription to be ready
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: Subscription
+    name: "{{ traderlite.subscription_name }}"
+    namespace: "{{ uid }}"
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: traderlite_subscription
+  until: traderlite_subscription.resources is defined and (traderlite_subscription.resources | length) > 0 and traderlite_subscription.resources[0].status.currentCSV is defined
+  delay: 10
+  retries: 18
+
+- name: Wait up to  5 mins for TraderLite Operator CSV to be avail
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: ClusterServiceVersion
+    name: "{{ traderlite_subscription.resources[0].status.currentCSV }}"
+    namespace: "{{ uid }}"
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: traderlite_csv
+  until: traderlite_csv.resources is defined and (traderlite_csv.resources | length) == 1 and traderlite_csv.resources[0].status.conditions is defined and (traderlite_csv.resources[0].status.conditions | length ) > 3 and traderlite_csv.resources[0].status.conditions[-1].phase == "Succeeded" and traderlite_csv.resources[0].status.conditions[-1].reason == "InstallSucceeded"
+  delay: 10
+  retries: 30

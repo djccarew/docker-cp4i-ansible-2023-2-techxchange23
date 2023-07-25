@@ -1,0 +1,22 @@
+apiVersion: appconnect.ibm.com/v1beta1
+kind: DesignerAuthoring
+metadata:
+  name: {{ cp4i_ace.designer.cr_name }}
+  namespace: {{ cp4i_ace.namespace }}
+spec:
+  version: "{{ cp4i_ace.designer.version }}"
+  license:
+    accept: true
+    license:  {{ cp4i_ace.designer.license }}
+    use: AppConnectEnterpriseProduction
+  designerFlowsOperationMode: local
+  designerMappingAssist:
+    enabled: true
+    incrementalLearning:
+      schedule: "Every 15 days"
+  couchdb:
+    storage:
+      class: {{ rw_once_storage_class }}
+      type: persistent-claim
+      size: 10Gi
+  useCommonServices: true

@@ -1,0 +1,33 @@
+apiVersion: appconnect.ibm.com/v1beta1
+kind: Dashboard
+metadata:
+  name: ibm-ace-dashboard
+  namespace: {{ cp4i_ace.namespace }}
+spec:
+  version: "{{ cp4i_ace.dashboard.version }}"
+  license:
+    accept: true
+    license: {{ cp4i_ace.dashboard.license }}
+    use: CloudPakForIntegrationNonProduction
+  replicas: 1
+  storage:
+    type: persistent-claim
+    class: {{ rw_many_storage_class }}
+    size: 5Gi
+  useCommonServices: true
+  pod:
+    containers:
+      content-server:
+        resources:
+          requests:
+            cpu: 50m
+            memory: 50Mi
+          limits:
+            memory: 512Mi
+      control-ui:
+        resources:
+          requests:
+            cpu: 50m
+            memory: 125Mi
+          limits:
+            memory: 512Mi

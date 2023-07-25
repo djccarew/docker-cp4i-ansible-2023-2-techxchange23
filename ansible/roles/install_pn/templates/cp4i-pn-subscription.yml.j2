@@ -1,0 +1,11 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: {{ cp4i_pn.subscription_name }}
+  namespace: {{ cp4i_pn.subscription_namespace }}
+spec:
+  channel: {{ cp4i_pn.subscription_channel }}
+  installPlanApproval: Automatic
+  name: {{ cp4i_pn.subscription_name }}
+  source: ibm-integration-platform-navigator-catalog
+  sourceNamespace: openshift-marketplace

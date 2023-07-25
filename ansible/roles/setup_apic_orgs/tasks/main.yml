@@ -1,0 +1,164 @@
+---
+- name: Get progress marker
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: 010-apic-org-setup-progress
+    namespace: default
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: existing_apic_org_setup_progress
+
+- name: Create CM marker if needed
+  community.okd.k8s:
+    state: present
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: 010-apic-org-setup-progress
+        namespace: default
+      data:
+        state: started
+  register: new_apic_install_progress
+  when: (existing_apic_org_setup_progress.resources | length) == 0
+
+- name: Get marker CM state (existing marker)
+  ansible.builtin.set_fact:
+    apic_org_marker_state: "{{ existing_apic_org_setup_progress.resources[0].data.state }}"
+  when: (existing_apic_org_setup_progress.resources | length) == 1
+
+- name: Get marker CM state (new marker)
+  ansible.builtin.set_fact:
+    apic_org_marker_state: 'started'
+  when: (existing_apic_org_setup_progress.resources | length) == 0
+
+- name: Skip apic-org-setup task message
+  debug:
+    msg: "apic-org-setup task already completed. Skipping ..."
+  when: apic_org_marker_state == 'complete'
+
+- name: Run apic-org-setup tasks
+  block:
+    - name: Executing apic-org-setup task message
+      debug:
+        msg: "Executing apic-org-setup task"
+
+    - name: Cloud Admin pwd secret
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        name: "{{ cp4i_apic.cr_name }}-mgmt-admin-pass"
+        namespace: "{{ cp4i_apic.namespace }}"
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: cloud_admin_pwd_secret
+
+    - name: Grab data from secret
+      ansible.builtin.set_fact:
+        admin_pwd: "{{ cloud_admin_pwd_secret.resources[0].data.password | b64decode }}"
+
+    - name: Get cpd route
+      kubernetes.core.k8s_info:
+        api_version: route.openshift.io/v1
+        kind: Route
+        name: cpd
+        namespace: "{{ cp4i_pn.namespace }}"
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: cpd_route
+
+    - name: "apic toolkit login server"
+      ansible.builtin.set_fact:
+        apic_host: "{{ cpd_route.resources[0].spec.host }}/integration/apis/{{ cp4i_apic.namespace }}/{{ cp4i_apic.cr_name }}"
+
+    - name: Run apic toolkit command to login
+      ansible.builtin.shell:
+        cmd: yes | apic-slim login --server {{ apic_host }} --username admin --password '{{ admin_pwd }}' --realm admin/default-idp-1 --accept-license
+
+    # - name: Get LDAP integration URL
+    #   ansible.builtin.shell:
+    #     cmd: apic-slim integrations:list --server  {{ apic_host }} --subcollection user-registry | grep ldap | tr -s ' ' | cut -d ' ' -f4
+    #   register: ldap_integration_url_cmd
+
+    # - name: Save LDAP integration URL
+    #   ansible.builtin.set_fact:
+    #     ldap_integration_url:  "{{ ldap_integration_url_cmd.stdout }}"
+
+    # - name: LDAP config from template
+    #   ansible.builtin.template:
+    #     src: ldap-config.yml.j2
+    #     dest: apic/ldap-config.yml
+    #     force: yes
+
+    # - name: See if ldap reg already exists
+    #   ansible.builtin.shell:
+    #     cmd: apic-slim user-registries:list  --server {{ apic_host }} --org admin  | grep  workshop-ldap
+    #   register: reg_check
+    #   failed_when: reg_check.rc == 2
+
+    # - name: Create reg if it doesn't exist
+    #   block:
+    #       - name: Create reg command
+    #         ansible.builtin.shell:
+    #           cmd: apic-slim user-registries:create --server {{ apic_host }} --org admin apic/ldap-config.yml
+    #         register: create_reg_cmd
+
+    #       - name: Parse output from create reg command
+    #         ansible.builtin.shell:
+    #           cmd: echo "{{ create_reg_cmd.stdout }}" | tr -s ' ' | cut -d ' ' -f 2
+    #         register: parse_create_reg_cmd
+
+    #       - name: Save ldap reg url
+    #         ansible.builtin.set_fact:
+    #           ldap_reg_url: "{{ parse_create_reg_cmd.stdout }}"
+
+    #       - name: Delete old registry setting file if exists
+    #         ansible.builtin.file:
+    #           path: "apic/user-registry-setting.yaml"
+    #           state: absent  
+
+    #       - name: Generate registry settings file
+    #         ansible.builtin.shell:
+    #           cmd: apic-slim user-registry-settings:get --server {{ apic_host }} --output apic
+    #         register:  
+
+    #       - name: Update user-registry-settings
+    #         ansible.builtin.shell:
+    #           cmd: sed -i "s|provider_user_registry_default|  - '{{ ldap_reg_url}}'\nprovider_user_registry_default|g" apic/user-registry-setting.yaml 
+
+    #       - name: Apply changes
+    #         ansible.builtin.shell: 
+    #           cmd: apic-slim user-registry-settings:update --server {{ apic_host }} apic/user-registry-setting.yaml 
+
+    #   when: reg_check.rc == 1
+
+    - name: Create orgs for each user
+      include_tasks: create_org.yml
+      loop: "{{ range(student_start_index, num_students + student_start_index, 1)|list }}"
+
+    - name: Run apic toolkit command to logout
+      ansible.builtin.shell:
+        cmd: apic-slim logout --server {{ apic_host }}
+
+    - name: Update CM marker
+      community.okd.k8s:
+        state: present
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: 010-apic-org-setup-progress
+            namespace: default
+          data:
+            state: complete
+
+  when: apic_org_marker_state == 'started'
+
+- name: Successful completion message
+  debug:
+    msg: "apic-org-setup completed successfully"

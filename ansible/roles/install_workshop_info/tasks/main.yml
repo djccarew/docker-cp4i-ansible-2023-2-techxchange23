@@ -1,0 +1,99 @@
+---
+- name: Get progress marker
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: 10-workshop-info-install-progress
+    namespace: default
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: existing_workshop_info_install_progress
+
+- name: Create CM marker if needed
+  kubernetes.core.k8s:
+    state: present
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: 10-workshop-info-install-progress
+        namespace: default
+      data:
+        state: started
+  register: new_workshop_info_install_progress
+  when: (existing_workshop_info_install_progress.resources | length) == 0
+
+- name: Get marker CM state (existing marker)
+  ansible.builtin.set_fact:
+    workshop_info_marker_state: "{{ existing_workshop_info_install_progress.resources[0].data.state }}"
+  when: (existing_workshop_info_install_progress.resources | length) == 1
+
+- name: Get marker CM state (new marker)
+  ansible.builtin.set_fact:
+    workshop_info_marker_state: 'started'
+  when: (existing_workshop_info_install_progress.resources | length) == 0
+
+- name: Skip workshop-info-install task message
+  debug:
+    msg: "workshop-info-install task already completed. Skipping ..."
+  when: workshop_info_marker_state == 'complete'
+
+- name: Run workshop-info-install tasks
+  block:
+    - name: Executing workshop-info-install task message
+      debug:
+        msg: "Executing workshop-info-install task"
+   
+    - name: Get OpenShift version
+      ansible.builtin.shell: oc version --token={{ login_token }} --server={{ cluster_api_url }} | grep Server | cut -d ' ' -f3
+      register: version_from_oc
+      when: openshift_version is undefined
+
+    - name: Save OpenShift version
+      ansible.builtin.set_fact:
+        openshift_version: "{{ version_from_oc.stdout }}"
+      when: version_from_oc is defined and version_from_oc.stdout is defined
+
+    - name: ClusterRole
+      kubernetes.core.k8s:
+        state: present
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        src: "k8s/cp4i-workshop-info-cr.yml"
+
+    - name: Create ClusterRoleBinding from template
+      ansible.builtin.template:
+        src: cp4i-workshop-info-crb.yml.j2
+        dest: k8s/cp4i-workshop-info-crb.yml
+        force: yes
+
+    - name: Apply ClusterRoleBinding
+      kubernetes.core.k8s:
+        state: present
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        src: "k8s/cp4i-workshop-info-crb.yml"
+
+    - name: Install app for each student
+      include_tasks: each_student.yml
+      loop: "{{ range(student_start_index, num_students + student_start_index, 1)|list }}"
+
+    - name: Update CM marker
+      kubernetes.core.k8s:
+        state: patched
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        name: 10-workshop-info-install-progress
+        namespace: default
+        kind: ConfigMap
+        definition:
+          data:
+            state: complete
+
+    - name:  workshop-info-install task completion message
+      debug:
+        msg: "workshop-info-install task completed successfully"
+
+  when: workshop_info_marker_state == 'started'

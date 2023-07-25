@@ -1,0 +1,11 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name:  {{ cp4i_assets.subscription_name }}
+  namespace: {{ cp4i_assets.subscription_namespace }}
+spec:
+  channel: {{ cp4i_assets.subscription_channel }}
+  installPlanApproval: Automatic
+  name: {{ cp4i_assets.subscription_name }}
+  source: ibm-integration-asset-repository-catalog
+  sourceNamespace: openshift-marketplace

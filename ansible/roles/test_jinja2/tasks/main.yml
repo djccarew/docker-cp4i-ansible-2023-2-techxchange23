@@ -1,0 +1,7 @@
+---
+
+- name: Template with loop
+  ansible.builtin.template:
+    src: cp4i-workshop-info-crb.yml.j2
+    dest: k8s/cp4i-workshop-info-crb.yml
+    force: yes

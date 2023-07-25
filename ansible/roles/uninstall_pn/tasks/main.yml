@@ -1,0 +1,66 @@
+---
+- name: Get PN namespace
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Namespace
+    name: "{{ cp4i_pn.namespace }}"
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: cp4i_pn_ns
+
+- name: Delete namespaced resources
+  block:
+
+    - name: Delete PlatformNavigator operands
+      ansible.builtin.shell: oc delete  platformnavigator --all -n {{ cp4i_pn.namespace }} --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+
+    - name: Delete Routes
+      ansible.builtin.shell: oc delete  route  --all -n {{ cp4i_pn.namespace }} --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+
+  when: (cp4i_pn_ns.resources | length) == 1
+  
+- name: Get Subscription
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: Subscription
+    name: "{{ cp4i_pn.subscription_name }}"
+    namespace: "{{ cp4i_pn.subscription_namespace }}"
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: cp4i_pn_subscription
+
+- name: Delete subscription and CSV
+  block:
+    - name: Delete Operator
+      community.okd.k8s:
+        api_version: operators.coreos.com/v1alpha1
+        kind: Subscription
+        name: "{{ cp4i_pn.subscription_name }}"
+        namespace: "{{ cp4i_pn.subscription_namespace }}"
+        state: absent
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+
+    - name: Delete CSV
+      community.okd.k8s:
+        api_version: operators.coreos.com/v1alpha1
+        kind: ClusterServiceVersion
+        name: "{{ cp4i_pn_subscription.resources[0].status.currentCSV }}"
+        namespace: "{{ cp4i_pn.subscription_namespace }}"
+        state: absent
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+
+  when: (cp4i_pn_subscription.resources | length) == 1
+
+- name: Delete marker CM
+  community.okd.k8s:
+    api_version: v1
+    kind: ConfigMap
+    name: 02-pn-install-progress
+    namespace: default
+    state: absent
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"

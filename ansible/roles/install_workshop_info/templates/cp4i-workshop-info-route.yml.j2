@@ -1,0 +1,19 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: workshop-info
+  namespace: {{ uid }}
+  annotations:
+    openshift.io/host.generated: 'true'
+spec:
+  host: ""
+  to:
+    kind: Service
+    name: workshop-info
+    weight: 100
+  port:
+    targetPort: 3000
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None

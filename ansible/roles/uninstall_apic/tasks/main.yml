@@ -1,0 +1,171 @@
+---
+- name: Get APIC namespace
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Namespace
+    name: "{{ cp4i_apic.namespace }}"
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: cp4i_apic_ns
+
+- name: Delete namespaced resources
+  block:
+
+    - name: Delete APIC operands
+      ansible.builtin.shell: oc delete apiconnectcluster --all -n {{ cp4i_apic.namespace }} --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+
+    - name: Delete the API Connect backup and restore CRs
+      ansible.builtin.shell: oc delete apic --all  -n {{ cp4i_apic.namespace }} --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+
+    - name: Delete remaining secrets
+      ansible.builtin.shell: oc get secrets --no-headers -n {{ cp4i_apic.namespace }} --server={{ cluster_api_url }} --token={{ login_token }} | cut -d' ' -f1 | grep "^apicinstan-" | xargs oc delete secret -n {{ cp4i_apic.namespace }} --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+
+    - name: Delete remaining PVCs
+      ansible.builtin.shell: oc delete pvc -n {{ cp4i_apic.namespace }} -l app.kubernetes.io/managed-by=ibm-apiconnect --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+
+    - name: Delete NatsStreamingCluster operands
+      ansible.builtin.shell: oc delete NatsStreamingCluster --all  -n {{ cp4i_apic.namespace }} --server={{ cluster_api_url }} --token={{ login_token }} -o name | xargs oc delete -n {{ cp4i_apic.namespace }} --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+
+    - name: Delete APIC secret rotations CRs
+      ansible.builtin.shell: |
+         oc delete mgmtsr -n {{ cp4i_apic.namespace }}  --all --server={{ cluster_api_url }} --token={{ login_token }}
+         oc delete ptlsr -n {{ cp4i_apic.namespace }} --all --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+
+    - name: postgres resources - deployments
+      ansible.builtin.shell: oc delete deployments -n {{ cp4i_apic.namespace }} -l vendor=crunchydata --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+
+    - name: postgres resources - jobs
+      ansible.builtin.shell: oc delete jobs -n {{ cp4i_apic.namespace }} -l vendor=crunchydata --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+
+    - name: postgres resources - roles
+      ansible.builtin.shell: oc delete roles -n {{ cp4i_apic.namespace }} -l vendor=crunchydata --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+
+    - name: postgres resources - rolebindings
+      ansible.builtin.shell: oc delete rolebindings -n {{ cp4i_apic.namespace }} -l vendor=crunchydata --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+
+    - name: postgres resources - secrets
+      ansible.builtin.shell: oc delete secrets -n {{ cp4i_apic.namespace }} -l vendor=crunchydata --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+
+    - name: postgres resources - configmaps
+      ansible.builtin.shell: oc delete cm -n {{ cp4i_apic.namespace }} -l vendor=crunchydata --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+
+    - name: postgres resources - pgtasks
+      ansible.builtin.shell: oc delete pgtasks.crunchydata.com -n {{ cp4i_apic.namespace }} -l vendor=crunchydata --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+
+    - name: postgres resources - pgreplica
+      ansible.builtin.shell: oc delete pgreplica -n {{ cp4i_apic.namespace }} -l vendor=crunchydata --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+
+    - name: Delete DataPowerService operands
+      ansible.builtin.shell: oc delete datapowerservice --all -n {{ cp4i_apic.namespace }} --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+
+    - name: Delete DataPowerMonitor operands
+      ansible.builtin.shell: oc delete datapowermonitor --all -n {{ cp4i_apic.namespace }} --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+      
+  when: (cp4i_apic_ns.resources | length) == 1
+
+- name: Get APIC Operator Subscription
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: Subscription
+    name: "{{ cp4i_apic.subscription_name }}"
+    namespace: "{{ cp4i_apic.subscription_namespace }}"
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: cp4i_apic_subscription
+
+- name: Delete APIC Operator subscription and CSV
+  block:
+    - name: Delete Operator
+      community.okd.k8s:
+        api_version: operators.coreos.com/v1alpha1
+        kind: Subscription
+        name: "{{ cp4i_apic.subscription_name }}"
+        namespace: "{{ cp4i_apic.subscription_namespace }}"
+        state: absent
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+
+    - name: Delete CSV
+      community.okd.k8s:
+        api_version: operators.coreos.com/v1alpha1
+        kind: ClusterServiceVersion
+        name: "{{ cp4i_apic_subscription.resources[0].status.currentCSV }}"
+        namespace: "{{ cp4i_apic.subscription_namespace }}"
+        state: absent
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      ignore_errors: yes
+
+  when: (cp4i_apic_subscription.resources | length) == 1
+
+
+- name: Get DataPower Gateway Subscription
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: Subscription
+    name: "{{ cp4i_apic.dpgw_subscription_name }}"
+    namespace: "{{ cp4i_apic.dpgw_subscription_namespace }}"
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: cp4i_apic_dpgw_subscription
+
+- name: Delete DataPower Gateway subscription and CSV
+  block:
+    - name: Delete Operator
+      community.okd.k8s:
+        api_version: operators.coreos.com/v1alpha1
+        kind: Subscription
+        name: "{{ cp4i_apic.dpgw_subscription_name }}"
+        namespace: "{{ cp4i_apic.dpgw_subscription_namespace }}"
+        state: absent
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+
+    - name: Delete CSV
+      community.okd.k8s:
+         api_version: operators.coreos.com/v1alpha1
+         kind: ClusterServiceVersion
+         name: "{{ cp4i_apic_dpgw_subscription.resources[0].status.currentCSV }}"
+         namespace: "{{ cp4i_apic.dpgw_subscription_namespace }}"
+         state: absent
+         api_key: "{{ login_token }}"
+         host: "{{ cluster_api_url }}"
+      ignore_errors: yes
+
+  when: (cp4i_apic_dpgw_subscription.resources | length) == 1
+
+- name: Delete marker CM for APIC
+  community.okd.k8s:
+    api_version: v1
+    kind: ConfigMap
+    name: 03-apic-install-progress
+    namespace: default
+    state: absent
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+
+- name: Delete marker CM for APIC Org
+  community.okd.k8s:
+    api_version: v1
+    kind: ConfigMap
+    name: 07-apic-org-setup-progress
+    namespace: default
+    state: absent
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"

@@ -1,0 +1,247 @@
+---
+- name: Get progress marker
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: 001-pre-install-progress
+    namespace: default
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: existing_pre_install_progress
+
+- name: Create CM marker if needed
+  community.okd.k8s:
+    state: present
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: 001-pre-install-progress
+        namespace: default
+      data:
+        state: started
+  register: new_preinstall_progress
+  when: (existing_pre_install_progress.resources | length) == 0
+
+- name: Get marker CM state (existing marker)
+  ansible.builtin.set_fact:
+    marker_state: "{{ existing_pre_install_progress.resources[0].data.state }}"
+  when: (existing_pre_install_progress.resources | length) == 1
+
+- name: Get marker CM state (new marker)
+  ansible.builtin.set_fact:
+    marker_state: 'started'
+  when: (existing_pre_install_progress.resources | length) == 0
+
+- name: Skip pre-install task message
+  debug:
+    msg: "pre-install task already completed. Skipping ..."
+  when: marker_state == 'complete'
+
+- name: Run pre-install tasks
+  block:
+    - name: Executing pre-install task message
+      debug:
+        msg: "Executing pre-install task"
+
+    - name: Add cp4i  CASE Catalog sources
+      community.okd.k8s:
+        state: present
+        src: "k8s/cp4i-catalog-source.yml"
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+
+    - name: Wait a few seconds for cp4i Catalog source to be accessible
+      ansible.builtin.pause:
+        seconds: 20
+
+    - name: Add TraderLite Catalog source
+      community.okd.k8s:
+        state: present
+        src: "k8s/traderlite-catalog-source.yml"
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+
+    - name: Wait a few seconds for traderlite Catalog source to be accessible
+      ansible.builtin.pause:
+        seconds: 10
+
+    - name: Create cp4i namespaces
+      kubernetes.core.k8s:
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ item }}"
+      with_items:
+        - "cp4i-pn"
+        - "cp4i-ace"
+        - "cp4i-apic"
+        - "cp4i-es"
+        - "cp4i-mq"
+        - "cp4i-traderlite"
+
+    - name: Create student namespaces
+      kubernetes.core.k8s:
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name:  "{{ 'student%03d' | format(item) }}"
+      loop: "{{ range(student_start_index, num_students + student_start_index, 1)|list }}"
+
+    - name: Pull secret Platform Navigator
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        name: ibm-entitlement-key
+        namespace: cp4i-pn
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: pn_ns_secret
+
+    - name: Create PN pull secret if not found
+      ansible.builtin.shell: oc create secret docker-registry ibm-entitlement-key --docker-server=cp.icr.io --docker-username=cp --docker-password={{ ibm_cr_token }} --token={{ login_token }} --server={{ cluster_api_url }} -n "cp4i-pn"
+      when: (pn_ns_secret.resources | length ) == 0
+
+    - name: Pull secret ACE
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        name: ibm-entitlement-key
+        namespace: cp4i-ace
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: ace_ns_secret
+
+    - name: Create ACE pull secret if not found
+      ansible.builtin.shell: oc create secret docker-registry ibm-entitlement-key --docker-server=cp.icr.io --docker-username=cp --docker-password={{ ibm_cr_token }} --token={{ login_token }} --server={{ cluster_api_url }} -n "cp4i-ace"
+      when: (ace_ns_secret.resources | length ) == 0
+
+    - name: Pull secret APIC
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        name: ibm-entitlement-key
+        namespace: cp4i-apic
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: apic_ns_secret
+
+    - name: Create APIC pull secret if not found
+      ansible.builtin.shell: oc create secret docker-registry ibm-entitlement-key --docker-server=cp.icr.io --docker-username=cp --docker-password={{ ibm_cr_token }} --token={{ login_token }} --server={{ cluster_api_url }} -n "cp4i-apic"
+      when: (apic_ns_secret.resources | length ) == 0
+
+    - name: Pull secret ES
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        name: ibm-entitlement-key
+        namespace: cp4i-es
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: es_ns_secret
+
+    - name: Create ES pull secret if not found
+      ansible.builtin.shell: oc create secret docker-registry ibm-entitlement-key --docker-server=cp.icr.io --docker-username=cp --docker-password={{ ibm_cr_token }} --token={{ login_token }} --server={{ cluster_api_url }} -n "cp4i-es"
+      when: (es_ns_secret.resources | length ) == 0
+
+    - name: Pull secret MQ
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        name: ibm-entitlement-key
+        namespace: cp4i-mq
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: mq_ns_secret
+
+    - name: Create ES pull secret if not found
+      ansible.builtin.shell: oc create secret docker-registry ibm-entitlement-key --docker-server=cp.icr.io --docker-username=cp --docker-password={{ ibm_cr_token }} --token={{ login_token }} --server={{ cluster_api_url }} -n "cp4i-mq"
+      when: (mq_ns_secret.resources | length ) == 0
+
+    # - name: Wait up to 3 mins for cp4i Catalog Source to be ready
+    #   kubernetes.core.k8s_info:
+    #     api_version: operators.coreos.com/v1alpha1
+    #     kind: CatalogSource
+    #     name: ibm-operator-catalog
+    #     namespace: openshift-marketplace
+    #     api_key: "{{ login_token }}"
+    #     host: "{{ cluster_api_url }}"
+    #   register: cp4i_cs
+    #   until: cp4i_cs.resources is defined and (cp4i_cs.resources | length) > 0 and cp4i_cs.resources[0].status.connectionState.lastObservedState == 'READY'
+    #   delay: 10
+    #   retries: 18
+
+    - name: Wait up to 3 mins for TraderLite Catalog Source to be ready
+      kubernetes.core.k8s_info:
+        api_version: operators.coreos.com/v1alpha1
+        kind: CatalogSource
+        name: ibm-build-lab-operator-catalog
+        namespace: openshift-marketplace
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: traderlite_cs
+      until: traderlite_cs.resources is defined and (traderlite_cs.resources | length) > 0 and traderlite_cs.resources[0].status.connectionState.lastObservedState == 'READY'
+      delay: 10
+      retries: 18
+   
+    - name: Setup LDAP secret for OCP
+      kubernetes.core.k8s:
+        state: present
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: ldap-secret
+            namespace: openshift-config
+          type: Opaque
+          data:
+            bindPassword: "{{ ldap.bind_dn_password | b64encode }}"
+
+    - name: LDAP CR from template
+      ansible.builtin.template:
+        src: openldap.cr.yml.j2
+        dest: ldap/openldap.cr.yml
+        force: no
+
+    - name: Apply LDAP CR
+      kubernetes.core.k8s:
+        state: present
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        src: "ldap/openldap.cr.yml"
+
+    - name: oc login for rbac commands   
+      ansible.builtin.shell:
+        cmd: oc login --token={{ login_token }} --server={{ cluster_api_url }}
+
+    - name: Set RBAC permissions for each user 
+      include_tasks: user_rbac.yml
+      loop: "{{ range(student_start_index, num_students + student_start_index, 1)|list }}"
+
+    - name: Update CM marker
+      community.okd.k8s:
+        state: present
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: 001-pre-install-progress
+            namespace: default
+          data:
+            state: complete
+
+  when: marker_state == 'started'

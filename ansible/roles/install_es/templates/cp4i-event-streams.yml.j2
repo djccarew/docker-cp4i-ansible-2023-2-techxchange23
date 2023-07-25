@@ -1,0 +1,54 @@
+kind: EventStreams
+apiVersion: eventstreams.ibm.com/v1beta2
+metadata:
+  annotations:
+    eventstreams.ibm.com/apicurio-registry-version: '>=2.4'
+  name: light-insecure
+  namespace: {{ cp4i_es.namespace }}
+spec:
+  version: {{ cp4i_es.version }}
+  license:
+    accept: true
+    license: {{ cp4i_es.license }}
+    use: CloudPakForIntegrationNonProduction
+  adminApi: {}
+  adminUI: {}
+  apicurioRegistry: {}
+  collector: {}
+  restProducer: {}
+  security:
+    internalTls: NONE
+  strimziOverrides:
+    kafka:
+      replicas: 1
+      config:
+        inter.broker.protocol.version: '3.4'
+        offsets.topic.replication.factor: 1
+        transaction.state.log.min.isr: 1
+        transaction.state.log.replication.factor: 1
+      listeners:
+        - name: plain
+          port: 9092
+          type: internal
+          tls: false
+      storage:
+        type: ephemeral
+      metricsConfig:
+        type: jmxPrometheusExporter
+        valueFrom:
+          configMapKeyRef:
+            key: kafka-metrics-config.yaml
+            name: light-insecure-metrics-config
+    zookeeper:
+      replicas: 1
+      metricsConfig:
+        type: jmxPrometheusExporter
+        valueFrom:
+          configMapKeyRef:
+            key: zookeeper-metrics-config.yaml
+            name: light-insecure-metrics-config
+      storage:
+        type: ephemeral
+  requestIbmServices:
+    iam: false
+    monitoring: false

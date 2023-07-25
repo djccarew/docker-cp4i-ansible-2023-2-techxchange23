@@ -1,0 +1,71 @@
+---
+- name: Get progress marker
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: 009-traderlite-install-progress
+    namespace: default
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: existing_traderlite_install_progress
+
+- name: Create CM marker if needed
+  community.okd.k8s:
+    state: present
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: 009-traderlite-install-progress
+        namespace: default
+      data:
+        state: started
+  register: new_traderlite_install_progress
+  when: (existing_traderlite_install_progress.resources | length) == 0
+
+- name: Get marker CM state (existing marker)
+  ansible.builtin.set_fact:
+    traderlite_marker_state: "{{ existing_traderlite_install_progress.resources[0].data.state }}"
+  when: (existing_traderlite_install_progress.resources | length) == 1
+
+- name: Get marker CM state (new marker)
+  ansible.builtin.set_fact:
+    traderlite_marker_state: 'started'
+  when: (existing_traderlite_install_progress.resources | length) == 0
+
+- name: Skip traderlite-install task message
+  debug:
+    msg: "traderlite-install task already completed. Skipping ..."
+  when: traderlite_marker_state == 'complete'
+
+- name: Run traderlite-install tasks
+  block:
+    - name: Executing traderlite-install task message
+      debug:
+        msg: "Executing traderlite-install task"
+
+    - name: Install Traderlite Operator for each user 
+      include_tasks: operator_install.yml
+      loop: "{{ range(student_start_index, num_students + student_start_index, 1)|list }}"
+
+    - name: Set Traderlite RBAC permissions for each user 
+      include_tasks: user_rbac.yml
+      loop: "{{ range(student_start_index, num_students + student_start_index, 1)|list }}"
+
+    - name: Update CM marker
+      community.okd.k8s:
+        state: present
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: 009-traderlite-install-progress
+            namespace: default
+          data:
+            state: complete 
+
+  when: traderlite_marker_state == 'started'

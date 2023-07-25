@@ -1,0 +1,112 @@
+---
+- name: Delete OperandRequest instances
+  ansible.builtin.shell: oc get  operandrequest -o name -n ibm-common-services --server={{ cluster_api_url }} --token={{ login_token }} | xargs oc delete -n ibm-common-services --server={{ cluster_api_url }} --token={{ login_token }}
+  ignore_errors: yes
+
+- name: Delete OperandConfig instances
+  ansible.builtin.shell: oc get operandconfig -o name -n ibm-common-services --server={{ cluster_api_url }} --token={{ login_token }} | xargs oc delete -n ibm-common-services --server={{ cluster_api_url }} --token={{ login_token }}
+  ignore_errors: yes
+
+- name: Delete OperandRegistry instances
+  ansible.builtin.shell: oc get operandregistry -o name   -n ibm-common-services --server={{ cluster_api_url }} --token={{ login_token }} | xargs oc delete -n ibm-common-services --server={{ cluster_api_url }} --token={{ login_token }}
+  ignore_errors: yes
+
+- name: Delete NamespaceScope instances
+  ansible.builtin.shell: oc get namespacescope -o name   -n ibm-common-services --server={{ cluster_api_url }} --token={{ login_token }} | xargs oc delete -n ibm-common-services --server={{ cluster_api_url }} --token={{ login_token }}
+  ignore_errors: yes
+
+- name: Get Operand Deployment Subscription
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: Subscription
+    name: operand-deployment-lifecycle-manager-app
+    namespace: ibm-common-services
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: operand_deployment_lifecycle_subscription
+
+- name: Delete Operand Deployment subscription and CSV
+  block:
+    - name: Delete Operator
+      community.okd.k8s:
+        api_version: operators.coreos.com/v1alpha1
+        kind: Subscription
+        name: operand-deployment-lifecycle-manager-app
+        namespace: ibm-common-services
+        state: absent
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+
+    - name: Delete CSV
+      community.okd.k8s:
+        api_version: operators.coreos.com/v1alpha1
+        kind: ClusterServiceVersion
+        name: "{{ operand_deployment_lifecycle_subscription.resources[0].status.currentCSV }}"
+        namespace: ibm-common-services
+        state: absent
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+
+  when: (operand_deployment_lifecycle_subscription.resources | length) == 1
+
+- name: Delete CommonService operand
+  ansible.builtin.shell: oc delete commonservice common-service -n ibm-common-services --server={{ cluster_api_url }} --token={{ login_token }} 
+  ignore_errors: yes
+
+- name: Get Common Services Subscription
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: Subscription
+    name: ibm-common-service-operator-v3.23-ibm-operator-catalog-openshift-marketplace
+    namespace: openshift-operators
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: common_services_subscription
+
+- name: Delete Common Services subscription and CSV
+  block:
+    - name: Delete Operator
+      community.okd.k8s:
+        api_version: operators.coreos.com/v1alpha1
+        kind: Subscription
+        name: ibm-common-service-operator-v3.23-ibm-operator-catalog-openshift-marketplace
+        namespace: openshift-operators
+        state: absent
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+
+    - name: Delete CSV
+      community.okd.k8s:
+        api_version: operators.coreos.com/v1alpha1
+        kind: ClusterServiceVersion
+        name: "{{ common_services_subscription.resources[0].status.currentCSV }}"
+        state: absent
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+
+  when: (common_services_subscription.resources | length) == 1
+
+- name: Remove related configmaps, secret and namespace
+  ansible.builtin.shell: |
+    oc -n kube-system delete secret icp-metering-api-secret --server={{ cluster_api_url }} --token={{ login_token }} --ignore-not-found=true
+    oc -n kube-public delete configmap ibmcloud-cluster-info --server={{ cluster_api_url }} --token={{ login_token }} --ignore-not-found=true
+    oc -n kube-public delete secret ibmcloud-cluster-ca-cert --server={{ cluster_api_url }} --token={{ login_token }} --ignore-not-found=true
+    oc delete ValidatingWebhookConfiguration cert-manager-webhook ibm-cs-ns-mapping-webhook-configuration --ignore-not-found --server={{ cluster_api_url }} --token={{ login_token }} --ignore-not-found=true
+    oc delete MutatingWebhookConfiguration cert-manager-webhook ibm-common-service-webhook-configuration ibm-operandrequest-webhook-configuration namespace-admission-config --ignore-not-found --server={{ cluster_api_url }} --token={{ login_token }} --ignore-not-found=true
+    oc delete namespace services --server={{ cluster_api_url }} --token={{ login_token }} --ignore-not-found=true
+    oc delete nss --all --server={{ cluster_api_url }} --token={{ login_token }} --ignore-not-found=true
+  ignore_errors: yes
+
+- name: Get IBM installed CRDs
+  ansible.builtin.shell: oc get crd -o template --template {% raw %}'{{range.items}}{{.metadata.name}}{{"\n"}}{{end}}'{{% endraw %}} --server={{ cluster_api_url }} --token={{ login_token }} | grep ibm.com
+  register: ibm_crds
+
+- name: Remove CRDs
+  community.okd.k8s:
+    api_version: apiextensions.k8s.io/v1
+    kind: CustomResourceDefinition
+    name: "{{ item }}"
+    state: absent
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  with_items: "{{ ibm_crds.stdout_lines | list }}"

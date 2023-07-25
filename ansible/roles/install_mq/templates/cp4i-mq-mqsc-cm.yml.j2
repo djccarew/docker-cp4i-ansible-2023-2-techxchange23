@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qmtrader-mqsc
+  namespace: {{ cp4i_mq.namespace }}
+data:
+  mqsc: |
+{% for n in range(student_start_index, num_students + student_start_index)  %}  
+    DEFINE QLOCAL({{ 'student%03d' | format(n) | upper }}.QUEUE) REPLACE
+{% endfor %}   
+    DEFINE CHANNEL(TRADER.TO.MQ) CHLTYPE(SVRCONN) TRPTYPE(TCP)
+    ALTER QMGR CHLAUTH (DISABLED)
+    ALTER AUTHINFO(SYSTEM.DEFAULT.AUTHINFO.IDPWOS) AUTHTYPE(IDPWOS) CHCKCLNT(NONE)
+
+

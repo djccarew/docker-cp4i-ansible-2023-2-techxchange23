@@ -1,0 +1,22 @@
+# rbac for a single user
+- name: Save user uid name
+  ansible.builtin.set_fact:
+    namespace: "{{ 'student%03d' | format(item) }}"
+
+- name: Output namespace 
+  ansible.builtin.debug:
+    msg: "Processing namespace  {{ namespace }} ..."
+
+- name: Role for Tradelite Operator CR
+  kubernetes.core.k8s:
+    state: present
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+    template: "traderlite-role.yml.j2"
+
+- name: Rolebinding for Tradelite Operator CR
+  kubernetes.core.k8s:
+    state: present
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+    template: "traderlite-role-binding.yml.j2"

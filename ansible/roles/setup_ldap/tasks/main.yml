@@ -1,0 +1,236 @@
+---
+- name: Get progress marker
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: 003-ldap-install-progress
+    namespace: default
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: existing_ldap_install_progress
+
+- name: Create CM marker if needed
+  community.okd.k8s:
+    state: present
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: 003-ldap-install-progress
+        namespace: default
+      data:
+        state: started
+  register: new_ldap_install_progress
+  when: (existing_ldap_install_progress.resources | length) == 0
+
+- name: Get marker CM state (existing marker)
+  ansible.builtin.set_fact:
+    ldap_marker_state: "{{ existing_ldap_install_progress.resources[0].data.state }}"
+  when: (existing_ldap_install_progress.resources | length) == 1
+
+- name: Get marker CM state (new marker)
+  ansible.builtin.set_fact: 
+    ldap_marker_state: 'started'
+  when: (existing_ldap_install_progress.resources | length) == 0
+
+- name: Skip ldap-install task message
+  debug:
+    msg: "ldap-install task already completed. Skipping ..."
+  when: ldap_marker_state == 'complete'
+
+- name: Run ldap-install tasks
+  block:
+    - name: Executing ldap-setup task message
+      debug:
+        msg: "Executing ldap-setup task"
+
+    - name: CP4I Admin pwd secret
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        name: "{{ common_services.admin_pwd_secret }}"
+        namespace: "{{ common_services.namespace }}"
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: cp4i_admin_pwd_secret
+
+    - name: Grab data from secret
+      ansible.builtin.set_fact:
+        admin_pwd: "{{ cp4i_admin_pwd_secret.resources[0].data.admin_password | b64decode }}"
+
+    - name: Get cp-console route
+      kubernetes.core.k8s_info:
+        api_version: route.openshift.io/v1
+        kind: Route
+        name: cp-console
+        namespace: "{{ common_services.namespace }}"
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: cp_console_route
+
+    - name: "cloudctl login server"
+      ansible.builtin.set_fact:
+        cloudctl_url: "https://{{ cp_console_route.resources[0].spec.host }}"
+
+    - name: Run cloudctl command to login
+      ansible.builtin.shell:
+        cmd: cloudctl login -a {{ cloudctl_url }} -u admin -p {{ admin_pwd }}  -n {{ common_services.namespace }}
+
+    - name: Check if ldap is already configured
+      ansible.builtin.shell:
+        cmd: cloudctl iam ldaps | grep -v {{ ldap.name }}
+      register: ldap_check
+      failed_when: ldap_check.rc == 2
+
+    - name: Setup LDAP for APIC if not configured
+      block:
+
+        # - name: Add Service Account for openldap
+        #   kubernetes.core.k8s:
+        #     state: present
+        #     api_key: "{{ login_token }}"
+        #     host: "{{ cluster_api_url }}"
+        #     definition:
+        #       apiVersion: v1
+        #       kind: ServiceAccount
+        #       metadata:
+        #         name: openldap
+        #         namespace: openldap
+
+        # - name: Add anyuid role for openldap 
+        #   kubernetes.core.k8s:
+        #     state: present
+        #     src: "k8s/openldap-scc-role.yml"
+        #     api_key: "{{ login_token }}"
+        #     host: "{{ cluster_api_url }}"
+
+        # - name: Add anyuid rolebinding for openldap 
+        #   kubernetes.core.k8s:
+        #     state: present
+        #     src: "k8s/openldap-scc-rolebinding.yml"
+        #     api_key: "{{ login_token }}"
+        #     host: "{{ cluster_api_url }}"
+
+        # - name: OpenLDAP deployment
+        #   kubernetes.core.k8s:
+        #     state: present
+        #     api_key: "{{ login_token }}"
+        #     host: "{{ cluster_api_url }}"
+        #     definition:
+        #       apiVersion: apps/v1
+        #       kind: Deployment
+        #       metadata:
+        #         name: openldap-local
+        #         namespace: openldap
+        #         labels:
+        #           app: ldap
+        #       spec:
+        #         selector:
+        #           matchLabels:
+        #             app: ldap
+        #         replicas: 1
+        #         template:
+        #           metadata:
+        #             labels:
+        #               app: ldap
+        #           spec:
+        #             serviceAccountName: openldap
+        #             containers:
+        #               - name: ldap
+        #                 image: quay.io/clouddragons/cp4i-var-openldap:latest
+        #                 ports:
+        #                   - containerPort: 389
+        #                     name: openldap
+        #                 securityContext:
+        #                   allowPrivilegeEscalation: false
+        #                   runAsUser: 0
+
+        # - name: OpenLDAP service
+        #   kubernetes.core.k8s:
+        #     state: present
+        #     api_key: "{{ login_token }}"
+        #     host: "{{ cluster_api_url }}"
+        #     definition:
+        #       apiVersion: v1
+        #       kind: Service
+        #       metadata:
+        #         labels:
+        #           app: ldap
+        #         name: ldap-service
+        #         namespace: openldap
+        #       spec:
+        #         type: ClusterIP
+        #         ports:
+        #           - port: 389
+        #         selector:
+        #           app: ldap
+
+        # - name: Pause for 10 seconds for LDAP pod to come up
+        #   ansible.builtin.pause:
+        #     seconds: 10
+
+        - name:  Add LDAP 
+          ansible.builtin.shell:
+            cmd: cloudctl iam ldap-create  {{ ldap.name }} --basedn "{{ ldap.base_dn }}" --server "{{ ldap.server }}" --group-filter "{{ ldap.group_filter }}" --group-id-map  "{{ ldap.group_id_map }}" --group-member-id-map "{{ ldap.group_member_id_map }}" --user-filter "{{ ldap.user_filter }}" --user-id-map "{{ ldap.user_id_map  }}" --binddn "{{ ldap.bind_dn }}" --binddn-password "{{ ldap.bind_dn_password }}" -t Custom 
+          register: add_ldap
+
+        - name: Get ldap repo id
+          ansible.builtin.shell:
+            cmd: echo "{{ add_ldap.stdout }}" | cut -d "'" -f2
+          register: ldap_id
+
+        - name: Save ldap id
+          ansible.builtin.set_fact:
+            saved_ldap_id: "{{ ldap_id.stdout }}"
+
+        - name: Import ldap users
+          ansible.builtin.shell:
+            cmd:  cloudctl iam user-import -c {{ saved_ldap_id }} -f -u  {{ 'student%d' | format(item) }}
+          loop: "{{ range(student_start_index, num_students + student_start_index, 1)|list }}"
+
+        - name: Create teams 
+          ansible.builtin.shell:
+            cmd:  cloudctl iam team-create students
+
+        - name: Pause for 5 seconds for team to finish initializing
+          ansible.builtin.pause:
+            seconds: 5
+
+        - name: Add users to team as admin
+          ansible.builtin.shell: 
+            cmd: cloudctl iam team-add-users students Administrator -u  {{ 'student%d' | format(item) }}
+          loop: "{{ range(student_start_index, num_students + student_start_index, 1)|list }}"
+
+        - name: Add resources to team
+          ansible.builtin.shell:
+            cmd: cloudctl iam resource-add students -r "crn:v1:icp:private:k8:mycluster:n/{{ item }}:::"
+          with_items:
+             - "cp4i-pn"
+             - "cp4i-apic"
+             - "cp4i-ace"
+             - "cp4i-mq"
+             - "cp4i-es"
+             - "ibm-common-services"
+
+        - name: Update CM marker
+          kubernetes.core.k8s:
+            state: patched
+            api_key: "{{ login_token }}"
+            host: "{{ cluster_api_url }}"
+            name: 003-ldap-install-progress
+            namespace: default
+            kind: ConfigMap
+            definition:
+              data:
+                state: complete
+
+        - name:  ldap-install task completion message
+          debug:
+            msg: "ldap-install task completed successfully"
+
+
+      when:  ldap_check.rc == 0
+
+  when: ldap_marker_state == 'started'

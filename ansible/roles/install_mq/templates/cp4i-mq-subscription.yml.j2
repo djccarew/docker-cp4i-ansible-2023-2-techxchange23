@@ -1,0 +1,15 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: {{ cp4i_mq.subscription_name }}
+  namespace: {{ cp4i_mq.subscription_namespace }}
+  labels:
+    app.kubernetes.io/instance: openshift-operators-ibm-mq-operator
+    operators.coreos.com/ibm-mq.openshift-operators: ''
+spec:
+  channel: {{ cp4i_mq.subscription_channel }}
+  installPlanApproval: Automatic
+  name: ibm-mq
+  source: ibmmq-operator-catalogsource
+  sourceNamespace: openshift-marketplace
+  

@@ -1,0 +1,278 @@
+---
+- name: Get progress marker
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: 0025-update-cp4i-ssl-certs-progress
+    namespace: default
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: existing_update_ssl_progress
+
+- name: Create CM marker if needed
+  community.okd.k8s:
+    state: present
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: 0025-update-cp4i-ssl-certs-progress
+        namespace: default
+      data:
+        state: started
+  register: new_update_ssl_progress
+  when: (existing_update_ssl_progress.resources | length) == 0
+
+- name: Get marker CM state (existing marker)
+  ansible.builtin.set_fact:
+    update_ssl_marker_state: "{{ existing_update_ssl_progress.resources[0].data.state }}"
+  when: (existing_update_ssl_progress.resources | length) == 1
+
+- name: Get marker CM state (new marker)
+  ansible.builtin.set_fact:
+    update_ssl_marker_state: 'started'
+  when: (existing_update_ssl_progress.resources | length) == 0
+
+- name: Skip update-cp4i-ssl-certs task message
+  debug:
+    msg: "update-cp4i-ssl-certs task already completed. Skipping ..."
+  when: update_ssl_marker_state == 'complete'
+
+- name: Run update-cp4i-ssl-certs tasks
+  block:
+    - name: Executing update-cp4i-ssl-certs task message
+      debug:
+        msg: "Executing update-cp4i-ssl-certs  task"
+
+    - name: Get Default IngressController
+      kubernetes.core.k8s_info:
+        api_version: operator.openshift.io/v1
+        kind: IngressController
+        name: default
+        namespace: openshift-ingress-operator
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: default_ingress_controller
+      failed_when: 'default_ingress_controller.resources is not defined or (default_ingress_controller.resources | length) < 1'
+
+    - name: Save name of secret with ca signed ingress certificate
+      ansible.builtin.set_fact:
+        default_cert_secret_name: "{{ default_ingress_controller.resources[0].spec.defaultCertificate.name }}"
+      
+    - name: Output name of secret with ca signed ingress certificate
+      ansible.builtin.debug:
+        msg: "Name of secret with ca signed ingress certificate is {{  default_cert_secret_name }}"
+
+    - name: Get secret with ca signed ingress certificate
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        name: "{{ default_cert_secret_name }}"
+        namespace: openshift-ingress
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: default_cert_secret
+      failed_when: 'default_cert_secret.resources is not defined or (default_cert_secret.resources | length) < 1'
+
+    
+    - name: Save the private key and cert chain in vars
+      ansible.builtin.set_fact:
+        default_cert_private_key: "{{ default_cert_secret.resources[0].data['tls.key'] | b64decode }}"
+        default_cert_chain:  "{{ default_cert_secret.resources[0].data['tls.crt'] | b64decode }}"
+    
+    - name: Save private key to file
+      ansible.builtin.template:
+        src: ssl-tls.key.j2
+        dest: k8s/ssl-tls.key
+
+    - name: Save cert chain to file
+      ansible.builtin.template:
+        src: ssl-ca-chain.crt.j2
+        dest: k8s/ssl-ca-chain.crt     
+
+      
+    - name: Split certs in ca chain
+      ansible.builtin.command: csplit -s -z -f cacert- ssl-ca-chain.crt '/-----BEGIN CERTIFICATE-----/' '{*}'
+      args:
+        creates: k8s/cacert-00
+        chdir: /ansible/k8s
+
+    - name: Create default cert from split output
+      ansible.builtin.command: mv k8s/cacert-00 k8s/ssl-tls.crt
+      args:
+        removes: k8s/cacert-00 
+        creates: k8s/ssl-tls.crt
+
+
+    - name: Merge second and third cert into a single ca file
+      ansible.builtin.shell: |
+        cat k8s/cacert-01 k8s/cacert-02 > k8s/ssl-ca.crt
+      args:
+        creates: k8s/ssl-ca.crt
+  
+
+    - name: Create secret with new certs for Platform Navigator
+      ansible.builtin.shell: |
+        oc -n {{ cp4i_pn.namespace }} --server={{ cluster_api_url }} --token={{ login_token }} create secret generic custom-cert --save-config --dry-run=client --from-file=ca.crt=ssl-ca.crt  --from-file=tls.crt=ssl-tls.crt  --from-file=tls.key=ssl-tls.key -o yaml | oc --server={{ cluster_api_url }} --token={{ login_token }} apply -f -
+      args:
+        chdir: k8s
+
+    - name: Update Platform Navigator with new certs
+      kubernetes.core.k8s:
+        state: patched
+        kind: PlatformNavigator
+        api_version: integration.ibm.com/v1beta1
+        name: integration-navigator
+        namespace: "{{ cp4i_pn.namespace }}"
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        definition:
+          spec:
+            tls:
+              secretName: custom-cert
+              
+
+    - name:  Taking ownership of the certificate away from common services
+      kubernetes.core.k8s:
+        state: patched
+        kind: ManagementIngress
+        api_version: operator.ibm.com/v1alpha1
+        name: default
+        namespace: "{{ cp4i_pn.cs_namespace }}" 
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        definition:
+          spec:
+            ignoreRouteCert: true
+    
+    - name: Delete cert manager generated cert
+      kubernetes.core.k8s:
+        state: absent
+        kind: Certificate
+        api_version: cert-manager.io/v1
+        name: route-cert
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        namespace: "{{ cp4i_pn.cs_namespace }}" 
+
+    - name: Delete secret linked to  cert manager generated cert
+      kubernetes.core.k8s:
+        state: absent
+        kind: Secret
+        name: route-tls-secret
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"        
+        namespace: "{{ cp4i_pn.cs_namespace }}" 
+ 
+    - name: Recreate secret with new certs for CS
+      ansible.builtin.shell: |
+        oc -n {{ cp4i_pn.cs_namespace }} --server={{ cluster_api_url }} --token={{ login_token }} create secret generic route-tls-secret  --from-file=ca.crt=ssl-ca.crt  --from-file=tls.crt=ssl-tls.crt  --from-file=tls.key=ssl-tls.key 
+      args:  
+       chdir: k8s
+       
+    - name: Deleting ibmcloud-cluster-ca-cert to trigger a certificate refresh
+      kubernetes.core.k8s:
+        state: absent
+        kind: Secret
+        name: ibmcloud-cluster-ca-cert
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"       
+        namespace: "{{ cp4i_pn.cs_namespace }}" 
+
+    # - name: Restart the auth-idp Pods in CS 
+    #   kubernetes.core.k8s:
+    #     state: absent
+    #     kind: Pod
+    #     namespace: "{{ cp4i_pn.cs_namespace }}" 
+    #     api_key: "{{ login_token }}"
+    #     host: "{{ cluster_api_url }}"
+    #     label_selectors:
+    #       - "app=auth-idp"
+
+    - name: Stop the auth-idp Pods in CS       
+      kubernetes.core.k8s_scale:
+        api_version: v1
+        kind: Deployment
+        name: auth-idp
+        namespace: "{{ cp4i_pn.cs_namespace }}" 
+        replicas: 0
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        wait: false
+
+    - name: Deleting the management-ingress-ibmcloud-cluster-ca-cert secret
+      kubernetes.core.k8s:
+        state: absent
+        kind: Secret
+        name: management-ingress-ibmcloud-cluster-ca-cert
+        namespace: "{{ cp4i_pn.cs_namespace }}" 
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+
+    - name: Creating a new operand request that will trigger the recreation of the management-ingress secret
+      kubernetes.core.k8s:
+        state: present
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        template: operand-request.yml.j2
+        wait: true
+        wait_condition:
+          type: Ready
+        wait_sleep: 10
+        wait_timeout: 300
+
+    - name: Wait  for the auth-idp pods to be ready
+      kubernetes.core.k8s_scale:
+       api_version: v1
+       kind: Deployment
+       name: auth-idp
+       namespace: "{{ cp4i_pn.cs_namespace }}" 
+       replicas: 1
+       api_key: "{{ login_token }}"
+       host: "{{ cluster_api_url }}"
+
+
+    # - name: Wait up to 5 mins for the auth-idp pods to be ready
+    #   kubernetes.core.k8s_info:
+    #     kind: Pod
+    #     namespace: "{{ cp4i_pn.cs_namespace }}" 
+    #     api_key: "{{ login_token }}"
+    #     host: "{{ cluster_api_url }}"
+    #     label_selectors:
+    #       - "app=auth-idp"
+    #     wait: true
+    #     wait_condition:
+    #       type: Ready
+    #     wait_sleep: 10
+    #     wait_timeout: 300
+
+    - name: Deleting the operand request now secret is up
+      kubernetes.core.k8s:
+        state: absent
+        kind: OperandRequest
+        name: register-new-ca-cert
+        api_version: operator.ibm.com/v1alpha1
+        namespace: "{{ cp4i_pn.cs_namespace }}" 
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+
+    - name: Update CM marker
+      kubernetes.core.k8s:
+        state: patched
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        name: 0025-traderlite-install-progress
+        namespace: default
+        kind: ConfigMap
+        definition:
+          data:
+            state: complete
+
+  when: update_ssl_marker_state == 'started'
+
+
+      
+
+  

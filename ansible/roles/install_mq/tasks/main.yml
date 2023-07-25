@@ -1,0 +1,136 @@
+---
+- name: Get progress marker
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: 008-mq-install-progress
+    namespace: default
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: existing_mq_install_progress
+
+- name: Create CM marker if needed
+  community.okd.k8s:
+    state: present
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: 008-mq-install-progress
+        namespace: default
+      data:
+        state: started
+  register: new_mq_install_progress
+  when: (existing_mq_install_progress.resources | length) == 0
+
+- name: Get marker CM state (existing marker)
+  ansible.builtin.set_fact:
+    mq_marker_state: "{{ existing_mq_install_progress.resources[0].data.state }}"
+  when: (existing_mq_install_progress.resources | length) == 1
+
+- name: Get marker CM state (new marker)
+  ansible.builtin.set_fact: 
+    mq_marker_state: 'started'
+  when: (existing_mq_install_progress.resources | length) == 0
+
+- name: Skip mq-install task message
+  debug:
+    msg: "mq-install task already completed. Skipping ..."
+  when: mq_marker_state == 'complete'
+
+- name: Run mq-install tasks
+  block:
+    - name: Executing mq-install task message
+      debug:
+        msg: "Executing mq-install task"
+
+    # - name: Set vars for Operator Group
+    #   ansible.builtin.set_fact:
+    #     operator_group_name: "{{ cp4i_mq.operator_group_name }}"
+    #     operator_group_namespace:  "{{ cp4i_mq.namespace }}"
+
+    # - name: OperatorGroup from template
+    #   ansible.builtin.template:
+    #     src: templates/cp4i-operator-group.yml.j2
+    #     dest: k8s/cp4i-mq-operator-group.yml
+    #     force: yes
+
+    # - name: OperatorGroup
+    #   community.okd.k8s:
+    #     state: present
+    #     api_key: "{{ login_token }}"
+    #     host: "{{ cluster_api_url }}"
+    #     src: "k8s/cp4i-mq-operator-group.yml"
+
+    - name: Subscription from template
+      ansible.builtin.template:
+        src: cp4i-mq-subscription.yml.j2
+        dest: k8s/cp4i-mq-subscription.yml
+        force: no
+
+    - name: Subscription
+      community.okd.k8s:
+        state: present
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        src: "k8s/cp4i-mq-subscription.yml"
+
+    - name: Wait a few seconds for the  CSV to accessible
+      ansible.builtin.pause:
+        seconds: 5
+
+    - name: Wait up to 3 mins for Subscription to be ready
+      kubernetes.core.k8s_info:
+        api_version: operators.coreos.com/v1alpha1
+        kind: Subscription
+        name: "{{ cp4i_mq.subscription_name }}"
+        namespace: "{{ cp4i_mq.subscription_namespace }}"
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: mq_subscription
+      until: mq_subscription.resources is defined and (mq_subscription.resources | length) > 0 and mq_subscription.resources[0].status.currentCSV is defined
+      delay: 10
+      retries: 18
+
+    - name: Wait up to  5 mins for MQ Operator CSV to be avail
+      kubernetes.core.k8s_info:
+        api_version: operators.coreos.com/v1alpha1
+        kind: ClusterServiceVersion
+        name: "{{ mq_subscription.resources[0].status.currentCSV }}"
+        namespace: "{{ cp4i_mq.namespace }}"
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: mq_csv
+      until: mq_csv.resources is defined and (mq_csv.resources | length) == 1 and  mq_csv.resources[0].status is defined and mq_csv.resources[0].status.phase is defined and mq_csv.resources[0].status.phase == "Succeeded"
+      delay: 10
+      retries: 30
+
+    - name: MQSC ConfigMap from template
+      ansible.builtin.template:
+        src: cp4i-mq-mqsc-cm.yml.j2
+        dest: k8s/cp4i-mq-mqsc-cm.yml
+        force: no
+
+    - name: MQSC ConfigMap
+      community.okd.k8s:
+        state: present
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        src: "k8s/cp4i-mq-mqsc-cm.yml"
+
+    - name: QueueManager from template
+      ansible.builtin.template:
+        src: cp4i-queue-manager.yml.j2
+        dest: k8s/cp4i-queue-manager.yml
+        force: no
+
+    - name: QueueManager
+      community.okd.k8s:
+        state: present
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        src: "k8s/cp4i-queue-manager.yml"
+
+  when: mq_marker_state == 'started'

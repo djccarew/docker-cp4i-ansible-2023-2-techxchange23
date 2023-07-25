@@ -1,0 +1,65 @@
+---
+- name: Get progress marker
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: 007-ace-install-progress
+    namespace: default
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: existing_ace_install_progress
+
+- name: Make sure ace install is started
+  ansible.builtin.assert:
+    that:
+      - (existing_ace_install_progress.resources | length) == 1
+    fail_msg: "ace-install never started"
+
+- name: Wait for ace-install to complete
+  block:
+    - name: Wait up to 20 mins for DesignerAuthoring CR to be avail
+      kubernetes.core.k8s_info:
+        api_version: appconnect.ibm.com/v1beta1
+        kind: DesignerAuthoring
+        name: "{{ cp4i_ace.designer.cr_name }}"
+        namespace: "{{ cp4i_ace.namespace }}"
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: designer_cr
+      until: designer_cr.resources is defined and (designer_cr.resources | length) == 1 and  designer_cr.resources[0].status.conditions[0].status == "True" and designer_cr.resources[0].status.conditions[0].type == "Ready"
+      delay: 20
+      retries: 60
+
+    # - name: Wait up to 15 mins for Dashboard CR to be avail
+    #   kubernetes.core.k8s_info:
+    #     api_version: appconnect.ibm.com/v1beta1
+    #     kind: Dashboard
+    #     name: ibm-ace-dashboard
+    #     namespace: "{{ cp4i_ace.namespace }}"
+    #     api_key: "{{ login_token }}"
+    #     host: "{{ cluster_api_url }}"
+    #   register: dashboard_cr
+    #   until: dashboard_cr.resources is defined and (dashboard_cr.resources | length) == 1 and  dashboard_cr.resources[0].status.conditions[0].status == "True" and dashboard_cr.resources[0].status.conditions[0].type == "Ready"
+    #   delay: 20
+    #   retries: 45
+
+    - name: Update CM marker
+      community.okd.k8s:
+        state: present
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: 007-ace-install-progress
+            namespace: default
+          data:
+            state: complete
+
+  when: existing_ace_install_progress.resources[0].data.state == 'started'
+
+- name: Successful completion message
+  debug:
+    msg: "ace-install completed successfully"
+  #when: existing_ace_install_progress.resources[0].data.state == 'complete'

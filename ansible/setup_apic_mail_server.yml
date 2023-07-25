@@ -1,0 +1,6 @@
+---
+- hosts: localhost
+  gather_facts: true
+
+  roles:
+    - role: setup_apic_mail_server

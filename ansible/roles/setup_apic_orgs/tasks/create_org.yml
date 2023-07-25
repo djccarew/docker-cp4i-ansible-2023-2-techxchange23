@@ -1,0 +1,77 @@
+# creates a single student org
+---
+- name: Save org name
+  ansible.builtin.set_fact:
+    org_name: "{{ 'student%d' | format(item) }}org"
+
+- name: Output org name
+  ansible.builtin.debug:
+    msg: "Processing {{ org_name }} ..."
+
+- name: See if org already exists
+  ansible.builtin.shell:
+    cmd: apic-slim orgs:list --server {{ apic_host }}  | grep {{ org_name }}
+  register: org_check
+  failed_when: org_check.rc == 2
+
+- name: Create org if it doesn't exist
+  block:
+
+    - name: Save lastname and uid
+      ansible.builtin.set_fact:
+        lastname:  "{{ 'Student%d' | format(item) }}"
+        uid: "{{ 'student%d' | format(item) }}"
+
+    - name: User from template
+      ansible.builtin.template:
+        src: user.txt.j2
+        dest: apic/user.txt
+        force: yes
+ 
+    - name: Check if user exists
+      ansible.builtin.shell:
+        cmd: apic-slim users:list --server {{ apic_host }} --org admin --user-registry common-services | grep {{ uid }}
+      register: user_chk
+      failed_when: user_chk.rc == 2
+
+      
+    - name: Create user 
+      ansible.builtin.shell:
+        cmd: apic-slim users:create --server {{ apic_host }} --org admin --user-registry common-services apic/user.txt
+      register: create_user_cmd
+      ignore_errors: yes
+      when: user_chk.rc == 1
+
+    - name: Get user URL new user
+      ansible.builtin.shell:
+        cmd: echo "{{ create_user_cmd.stdout }}"  | tr -s ' ' | cut -d ' ' -f 4
+      register: new_user_url_cmd
+      when: user_chk.rc == 1
+
+    - name: Get user URL existing user
+      ansible.builtin.shell:
+        cmd: echo "{{ user_chk.stdout }}"  | tr -s ' ' | cut -d ' ' -f 4
+      register: user_url_cmd
+      when: user_chk.rc == 0
+
+    - name: Save user url new user
+      ansible.builtin.set_fact:
+        user_url: "{{ new_user_url_cmd.stdout }}"
+      when: user_chk.rc == 1
+
+    - name: Save user url
+      ansible.builtin.set_fact:
+        user_url: "{{ user_url_cmd.stdout }}"
+      when: user_chk.rc == 0
+
+    - name: Org from template
+      ansible.builtin.template:
+        src: org.txt.j2
+        dest: apic/org.txt
+        force: yes
+
+    - name: create org
+      ansible.builtin.shell:
+        cmd: apic-slim orgs:create --server {{ apic_host }} apic/org.txt
+
+  when: org_check.rc == 1

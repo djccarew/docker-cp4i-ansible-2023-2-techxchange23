@@ -1,0 +1,128 @@
+---
+- name: Get MQ namespace
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Namespace
+    name: "{{ traderlite.namespace }}"
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: cp4i_traderlite_ns
+
+- name: Delete namespaced resources
+  block:
+
+    - name: Delete TraderLite operands
+      ansible.builtin.shell: oc delete  traderlite --all -n {{ cp4i_traderlite.namespace }} --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+
+    - name: Delete Routes
+      ansible.builtin.shell: oc delete  route  --all -n {{ cp4i_traderlite.namespace }} --server={{ cluster_api_url }} --token={{ login_token }}
+      ignore_errors: yes
+
+  when: (cp4i_traderlite_ns.resources | length) == 1
+
+- name: Get Subscription
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: Subscription
+    name: "{{ traderlite.subscription_name }}"
+    namespace: "{{ traderlite.subscription_namespace }}"
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: cp4i_traderlite_subscription
+
+- name: Delete subscription and CSV
+  block:
+    - name: Delete Operator
+      community.okd.k8s:
+        api_version: operators.coreos.com/v1alpha1
+        kind: Subscription
+        name: "{{ traderlite.subscription_name }}"
+        namespace: "{{ traderlite.subscription_namespace }}"
+        state: absent
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+
+    - name: Delete CSV
+      community.okd.k8s:
+        api_version: operators.coreos.com/v1alpha1
+        kind: ClusterServiceVersion
+        name: "{{ cp4i_traderlite_subscription.resources[0].status.currentCSV }}"
+        namespace: "{{ traderlite.subscription_namespace }}"
+        state: absent
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+
+  when: (cp4i_traderlite_subscription.resources | length) == 1
+
+
+- name: Delete Workshop Info Deployment
+  community.okd.k8s:
+    api_version: apps/v1
+    kind: Deployment
+    name: workshop-info
+    namespace: "{{ traderlite.namespace }}"
+    state: absent
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+
+- name: Delete Workshop Info Service
+  community.okd.k8s:
+    api_version: v1
+    kind: Service
+    name: workshop-info
+    namespace: "{{ traderlite.namespace }}"
+    state: absent
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+
+- name: Delete Workshop Info Cluster Role Binding
+  community.okd.k8s:
+    api_version: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    name: workshop-info-crb
+    state: absent
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+
+- name: Delete Workshop Info Cluster Role
+  community.okd.k8s:
+    api_version: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    name: workshop-info-cr
+    state: absent
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+
+- name: Delete Workshop Info Service
+  community.okd.k8s:
+    api_version: v1
+    kind: Service
+    name: workshop-info
+    namespace: "{{ traderlite.namespace }}"
+    state: absent
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+
+- name: Delete Workshop Info ServiceAccount
+  community.okd.k8s:
+    api_version: v1
+    kind: Service
+    name: workshop-info-sa
+    namespace: "{{ traderlite.namespace }}"
+    state: absent
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+
+- name: Delete marker CMs
+  community.okd.k8s:
+    api_version: v1
+    kind: ConfigMap
+    name: "{{ item }}"
+    namespace: default
+    state: absent
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  with_items:
+    - "08-traderlite-install-progress"
+    - "09-workshop-info-install-progress"

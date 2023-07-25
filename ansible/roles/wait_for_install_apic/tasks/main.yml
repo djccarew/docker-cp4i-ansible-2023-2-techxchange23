@@ -1,0 +1,52 @@
+---
+- name: Get progress marker
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: 005-apic-install-progress
+    namespace: default
+    api_key: "{{ login_token }}"
+    host: "{{ cluster_api_url }}"
+  register: existing_apic_install_progress
+
+- name: Make sure APIC install is started
+  ansible.builtin.assert:
+    that:
+      - (existing_apic_install_progress.resources | length) == 1
+    fail_msg: "apic-install never started"
+
+- name: Wait for apic-install to complete
+  block:
+    - name: Wait up to 40 mins for APIConnectCluster CR to be avail
+      kubernetes.core.k8s_info:
+        api_version: apiconnect.ibm.com/v1beta1
+        kind: APIConnectCluster
+        name: "{{ cp4i_apic.cr_name }}"
+        namespace: "{{ cp4i_apic.namespace }}"
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+      register: apic_cr
+      until: apic_cr.resources is defined and (apic_cr.resources | length) == 1 and apic_cr.resources[0].status is defined and (apic_cr.resources[0].status.conditions | selectattr('type','match','Ready') | selectattr('status','match','True') | list | length) > 0
+      delay: 20
+      retries: 120
+
+    - name: Update CM marker
+      community.okd.k8s:
+        state: present
+        api_key: "{{ login_token }}"
+        host: "{{ cluster_api_url }}"
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: 005-apic-install-progress
+            namespace: default
+          data:
+            state: complete
+
+  when: existing_apic_install_progress.resources[0].data.state == 'started'
+
+- name: Successful completion message
+  debug:
+    msg: "apic-install completed successfully"
+  #when: existing_apic_install_progress.resources[0].data.state == 'complete'
